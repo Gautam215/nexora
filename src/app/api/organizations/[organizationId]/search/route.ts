@@ -1,6 +1,6 @@
 import type { NextRequest } from "next/server";
 import type { SearchEntityType, SearchRequest } from "../../../../../security/search-schemas.ts";
-import { parseSearchRequest } from "../../../../../security/search-schemas.ts";
+import { hasMoreSearchResults, parseSearchRequest } from "../../../../../security/search-schemas.ts";
 import { jsonError, jsonOk, jsonServerFailure } from "../../../../../server/api.ts";
 import { getAuthPrincipal } from "../../../../../server/auth.ts";
 import { isRateLimited } from "../../../../../server/auth-rate-limit.ts";
@@ -110,8 +110,8 @@ const SEARCH_SOURCES: Record<SearchEntityType, string> = {
       AND ($3::uuid IS NULL OR EXISTS (
         SELECT 1
         FROM nexora.project_memberships AS project_member
-        WHERE project_member.organization_id = $1
-          AND project_member.project_id = $3
+         WHERE project_member.organization_id = $1::uuid
+           AND project_member.project_id = $3
           AND project_member.user_id = member.user_id
           AND project_member.status = 'active'
       ))
@@ -229,7 +229,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
         total: page.total,
         limit,
         offset,
-        hasMore: offset + page.results.length < page.total,
+        hasMore: hasMoreSearchResults(offset, page.results.length, page.total),
       },
     });
   } catch (error) {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseSearchRequest } from "../src/security/search-schemas.ts";
+import { hasMoreSearchResults, MAX_SEARCH_OFFSET, parseSearchRequest } from "../src/security/search-schemas.ts";
 
 const PROJECT_ID = "3b241101-e2bb-4255-8caf-4136c566a962";
 
@@ -38,4 +38,11 @@ test("search bounds reject missing, short, oversized, control, and excessive pag
   assert.equal(parseSearchRequest(new URLSearchParams("q=release&limit=51")).success, false);
   assert.equal(parseSearchRequest(new URLSearchParams("q=release&offset=10001")).success, false);
   assert.equal(parseSearchRequest(new URLSearchParams("q=release&offset=-1")).success, false);
+  assert.equal(parseSearchRequest(new URLSearchParams(`q=release&offset=${MAX_SEARCH_OFFSET}`)).success, true);
+});
+
+test("search pagination does not advertise results past the maximum offset", () => {
+  assert.equal(hasMoreSearchResults(MAX_SEARCH_OFFSET - 20, 20, MAX_SEARCH_OFFSET + 30), true);
+  assert.equal(hasMoreSearchResults(MAX_SEARCH_OFFSET, 20, MAX_SEARCH_OFFSET + 30), false);
+  assert.equal(hasMoreSearchResults(0, 20, 20), false);
 });

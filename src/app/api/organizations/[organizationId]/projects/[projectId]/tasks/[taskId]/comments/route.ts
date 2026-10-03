@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
-import { taskCommentCreateSchema } from "../../../../../../../../../security/task-schemas.ts";
+import { taskCommentCreateSchema } from "../../../../../../../../../security/comment-schemas.ts";
 import { hasSameOrigin, jsonError, jsonOk, jsonServerFailure, parseJson } from "../../../../../../../../../server/api.ts";
 import { getAuthPrincipal } from "../../../../../../../../../server/auth.ts";
 import { isRateLimited } from "../../../../../../../../../server/auth-rate-limit.ts";
@@ -26,7 +26,22 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const MENTION_TOKEN_PATTERN = /@\[([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]/gi;
 
+function readPagination(request: NextRequest): { limit: number; offset: number } | null {
+  const limitValue = request.nextUrl.searchParams.get("limit") ?? "100";
+  const offsetValue = request.nextUrl.searchParams.get("offset") ?? "0";
+  if (!/^\d{1,6}$/.test(limitValue) || !/^\d{1,6}$/.test(offsetValue)) return null;
+  const limit = Number(limitValue);
+  const offset = Number(offsetValue);
+  if (limit < 1 || limit > 100 || offset > 100_000) return null;
+  return { limit, offset };
+}
+
 export async function GET(request: NextRequest, { params }: RouteContext) {
+  const pagination = readPagination(request);
+  if (!pagination) {
+    return jsonError(request, 400, "INVALID_PAGINATION", "Use a comment page size from 1 to 100 and an offset up to 100000.");
+  }
+
   try {
     const principal = await getAuthPrincipal(request);
     if (!principal) return jsonError(request, 401, "AUTHENTICATION_REQUIRED", "Sign in to continue.");
@@ -61,13 +76,13 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
                   author.display_name AS author_name,
                   mention_list.mentions
            FROM (
-             SELECT comment.id, comment.body, comment.created_at, comment.author_user_id
-             FROM nexora.task_comments AS comment
-             WHERE comment.organization_id = $1
-               AND comment.project_id = $2
-               AND comment.task_id = $3
-             ORDER BY comment.created_at DESC, comment.id DESC
-             LIMIT 101
+              SELECT comment.id, comment.body, comment.created_at, comment.author_user_id
+              FROM nexora.task_comments AS comment
+              WHERE comment.organization_id = $1
+                AND comment.project_id = $2
+                AND comment.task_id = $3
+              ORDER BY comment.created_at DESC, comment.id DESC
+              LIMIT $4 OFFSET $5
            ) AS recent
            LEFT JOIN LATERAL (
              SELECT member.display_name
@@ -99,9 +114,14 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
                AND mention.comment_id = recent.id
            ) AS mention_list ON true
            ORDER BY recent.created_at ASC, recent.id ASC`,
-          [organizationId, projectId, taskId],
+          [organizationId, projectId, taskId, pagination.limit + 1, pagination.offset],
         );
-        return { comments: rows.rows.slice(-100), hasMore: rows.rows.length > 100 };
+        const hasMore = rows.rows.length > pagination.limit;
+        return {
+          comments: rows.rows.slice(-pagination.limit),
+          hasMore,
+          pagination: { limit: pagination.limit, offset: pagination.offset, hasMore },
+        };
       },
       "guest",
     );

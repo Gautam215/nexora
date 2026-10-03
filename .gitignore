@@ -150,3 +150,4 @@ vite.config.ts.timestamp-*
 
 # Nexora private server-side file storage
 .private-files/
+.neon

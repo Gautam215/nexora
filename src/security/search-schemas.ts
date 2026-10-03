@@ -4,6 +4,8 @@ const uuid = z.string()
   .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
   .transform((value) => value.toLowerCase());
 
+export const MAX_SEARCH_OFFSET = 10_000;
+
 const searchLimit = z.string()
   .regex(/^\d{1,2}$/)
   .default("20")
@@ -14,7 +16,7 @@ const searchOffset = z.string()
   .regex(/^\d{1,6}$/)
   .default("0")
   .transform(Number)
-  .pipe(z.number().int().min(0).max(10_000));
+  .pipe(z.number().int().min(0).max(MAX_SEARCH_OFFSET));
 
 export const searchRequestSchema = z.strictObject({
   q: z.string()
@@ -39,4 +41,8 @@ export function parseSearchRequest(params: URLSearchParams) {
     limit: params.get("limit") ?? undefined,
     offset: params.get("offset") ?? undefined,
   });
+}
+
+export function hasMoreSearchResults(offset: number, pageLength: number, total: number): boolean {
+  return offset < MAX_SEARCH_OFFSET && offset + pageLength < total;
 }
