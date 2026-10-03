@@ -1,0 +1,34 @@
+{
+  "name": "nexora",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "test": "node --conditions=react-server --experimental-strip-types --test tests/*.test.ts tests/*.test.mjs",
+    "db:migrate": "node scripts/migrate.mjs",
+    "files:cleanup": "node --conditions=react-server --experimental-strip-types scripts/cleanup-task-files.mjs"
+  },
+  "dependencies": {
+    "next": "16.3.6",
+    "nodemailer": "10.0.13",
+    "pg": "8.16.3",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "server-only": "0.0.1",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "@types/pg": "8.15.5",
+    "@types/react": "19.0.2",
+    "@types/react-dom": "19.0.2",
+    "typescript": "5.7.2"
+  }
+}

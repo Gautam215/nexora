@@ -1,0 +1,80 @@
+# PRD Traceability
+
+The attached nine-page PRD is authoritative. This audit is grouped by its 45 numbered sections, 0 through 44. A section is only **Verified** when all requirements in that section have an implementation and local evidence; partial completion of individual bullets does not count as a complete section. “Verified” is not a production-readiness or compliance claim.
+
+- **Verified:** every section requirement is implemented and locally checked, or (for documentation requirements) present in the reviewed artifact.
+- **Partial:** a real implementation exists, but at least one section requirement or its verification is outstanding.
+- **Foundation:** only enabling code, schema, or documentation exists; the section's complete capability is not implemented.
+- **Not started:** no corresponding implementation exists.
+
+## Status Counts
+
+| Status | Sections | Count |
+| --- | --- | ---: |
+| Verified | None | 0 |
+| Partial | 0, 1, 2, 4–16, 26–31, 34–36, 40–42 | 28 |
+| Foundation | 3, 23, 32, 33, 37–39, 43, 44 | 9 |
+| Not started | 17–22, 24, 25 | 8 |
+| **Total** | **0–44** | **45** |
+
+## Weighted Progress Estimate
+
+The weighted estimate assigns each PRD section a breadth weight from 1–8 based on the number and scope of its explicit requirement clusters (total weight 147). It is a status-based planning estimate, not a count of atomic requirements: implementation ratings are Verified 1.00, Partial 0.50, Foundation 0.20, and Not started 0.00; verification ratings are Verified 1.00, Partial 0.25, Foundation 0.10, and Not started 0.00. A whole section remains Verified only when all its stated requirements have local evidence. Under this conservative model, weighted implementation progress is **36.9%** (54.3/147 points) and weighted verification progress is **18.5%** (27.15/147 points). The decimals reflect the scoring formula, not precision in measuring product completeness.
+
+## Section Audit
+
+| PRD section | Status | Evidence and remaining requirements |
+| --- | --- | --- |
+| 0. Product UI/UX | Partial | Responsive, dark Nexora account, workspace, project, milestone, task and comment surfaces exist. Complete visual-system coverage and accessibility acceptance are unverified. |
+| 1. Product identity | Partial | Nexora branding and account/workspace entry exist; the full stated positioning and product experience are not implemented. |
+| 2. Primary objective | Partial | Organization, project, milestone, task, Kanban, audit, comments, mentions, project activity, in-app notifications, private task files, permission-aware workspace Search, and calculated project analytics have implementations. Migrations `0011`–`0016`, runtime grants, and selected Search/collaboration/analytics PostgreSQL tests pass locally. Search authorization integration verifies visible/hidden projects, not every result type; file-route and `task_files` RLS runtime integration coverage was not found. Realtime and AI workflows remain. |
+| 3. Target users | Foundation | Multi-tenant architecture targets teams, but capacity and scale beyond the current application have not been measured. |
+| 4. User roles | Partial | Organization and project roles have server-side checks; complete organization security settings and all role/resource workflows remain. |
+| 5. Authentication | Partial | Registration, login/logout, verification, password reset, hashed sessions/tokens and rate limits are implemented and tested. Password change, OAuth architecture, active-session management and production SMTP/configuration verification remain. |
+| 6. Organizations/tenancy | Partial | Organization creation/switching, invitations, membership changes, project memberships and RLS are implemented. Task-file metadata has project-scoped RLS policies, but the reviewed live RLS suite does not exercise `task_files`; organization settings/deletion remain. |
+| 7. Project management | Partial | Project attributes, membership, lifecycle, audit, optimistic versions and an audit-backed project activity feed are implemented. The project overview now includes database-calculated progress, health, workload, activity and deadline measures; PostgreSQL integration verifies values and hidden-project denial. Lifecycle/settings remain. |
+| 8. Milestones | Partial | Project-scoped create/list/update, dates, status transitions, task associations/progress and dependency rules have implementations. Schema/static guards exist, but no live PostgreSQL milestone-dependency cycle, prerequisite, or cross-project integration case was found. |
+| 9. Task management | Partial | Task CRUD/archive, assignment, labels, effort, subtasks, dependencies, configurable status, activity, append-only comments, project-member mentions and task attachments are implemented. Task/collaboration API behavior has selected PostgreSQL integration coverage; file-route and `task_files` RLS runtime coverage was not found. Accessibility/performance acceptance remains. |
+| 10. Concurrency & data consistency | Partial | Optimistic versions, transactional mutations, project-scoped locks, and task/milestone/comment idempotency are implemented. Realtime ordering/reconciliation and broader simultaneous-mutation/load verification remain. |
+| 11. Kanban & views | Partial | Configurable board/list, drag and status controls, filtering, sorting, pagination and safe bulk priority updates exist. The project overview now shows calculated progress, milestone progress, overdue work, activity, health and upcoming deadlines; remaining view/accessibility acceptance is outstanding. |
+| 12. Collaboration | Partial | Append-only task comments, active-project-member mentions, an audit-backed project-wide activity feed, in-app notifications and task file attachments are implemented. Selected comment/mention/notification migrations and PostgreSQL API checks pass locally; attachment API and file-table RLS runtime coverage was not found. Presence and realtime remain. |
+| 13. Notification system | Partial | Recipient-scoped read/unread state, in-app preferences, deduplication and UI are implemented; emitters cover mentions, task assignment, task/project/milestone changes and project membership. Migrations `0011`, `0015`, and `0016`, runtime grants, and database-backed notification behavior pass locally. Due-date/AI events, email delivery, retry processing and operational monitoring remain. |
+| 14. File/document system | Partial | Private per-deployment filesystem storage, bounded streaming uploads, extension/MIME/content checks, safe filenames, project/task authorization, five-minute user/file-version-bound signed download links, version-checked replacement, soft deletion, audit/notification events, metadata, and 30-day purge/orphan-cleanup logic are implemented. Unit tests and static migration/API guards cover selected file behavior; no file-route/`task_files` RLS runtime integration was found. The cleanup command must be scheduled by the operator; durable encrypted shared storage and optional malware scanning remain deployment follow-ups. |
+| 15. Search | Partial | Workspace search covers visible projects, active tasks, comments, active members and active file names with entity/project filters, bounded pagination, PostgreSQL full-text indexes, parameterized queries and per-user/IP rate limits. UI/schema tests and PostgreSQL integration cover visible/hidden project results; authorization behavior across every searched entity type is not established by those integration assertions. Responsive/accessibility acceptance remains. |
+| 16. Dashboard & analytics | Partial | The project overview reads authorized PostgreSQL task, milestone, project-membership and audit data for progress/completion, overdue work, assigned and unassigned workload, milestone progress, recent team activity, deterministic project health and the next dated tasks/milestones/project target. Formulas, empty states and display limits are explicit; no AI or capacity estimates are invented. Database-backed endpoint metrics and hidden-project denial pass; responsive/accessibility acceptance remains. |
+| 17. AI platform | Not started | No provider/model abstraction or AI execution records. |
+| 18. AI project planning | Not started | No structured plan generation, review or confirmation flow. |
+| 19. Meeting notes to tasks | Not started | No note extraction and human review workflow. |
+| 20. AI summarization | Not started | No authorized summarization workflow. |
+| 21. AI risk analysis | Not started | No AI-generated risk assessment. |
+| 22. AI project assistant | Not started | No assistant or scoped project-context retrieval. |
+| 23. AI security | Foundation | Threat boundaries are documented; scoped AI retrieval, prompt defenses, output validation and cost controls do not exist. |
+| 24. AI evaluation | Not started | No representative evaluation framework or cases. |
+| 25. Realtime WebSocket architecture | Not started | No authenticated transport, subscriptions, presence, event versioning or recovery. |
+| 26. API contract | Partial | Bounded inputs, safe errors, request IDs, no-store responses, origin checks, authorization, versions and selected idempotency are implemented. The private-file lifecycle contract is documented in `docs/architecture.md`; endpoint-by-endpoint docs for other routes, API evolution/deprecation policy and complete mutation idempotency remain. |
+| 27. Data lifecycle | Partial | Files become inaccessible immediately on deletion and purge logic removes expired files after 30 days; orphan objects older than 24 hours are also cleaned. The repository provides a cleanup command and operator instructions, not a configured scheduler or proof that cleanup is running. Export, account/org deletion and lifecycle coverage for other data remain. Comments currently have no edit/delete path. |
+| 28. Privacy | Partial | Data minimization, hashed secrets, least-privilege file access, private storage and short-lived signed links are implemented. SMTP is an external provider that receives account email and account-link tokens; user-facing provider disclosure/configuration is not documented. Deployment encryption and export/deletion operations remain; AI is absent. |
+| 29. Security architecture | Partial | RLS, separate DB roles, parameterized queries, strict schemas, secure cookies, origin checks, rate limits, security headers, nonce-based CSP for page requests, content-type/signature validation, private file permissions, signed file links, and project-access-gated analytics queries are implemented. CSP policy construction has unit coverage; no browser response/header regression test exists. Explicit CORS policy, encryption, malware scanning and independent security review remain. |
+| 30. Threat model | Partial | `docs/threat-model.md` records the requested categories and fields, but it remains an initial inventory: it lacks explicit actors/trust-boundary and data-flow views, scenario-level attack paths, a risk-rating method and one-to-one verification mapping. Its external-integration row must model SMTP; do not mark this section complete. |
+| 31. Auto-healing | Partial | A file-retention/orphan cleanup command is implemented, but this is a bounded maintenance operation, not a configured scheduler or general auto-healing system. Process/instance recovery, retries, queue recovery, circuit breakers, alert-aware controls and manual override remain absent. |
+| 32. Reliability | Foundation | Pool limits, query timeouts and transactional migrations exist. Retry/backoff, circuit breakers, health checks, queue recovery and dependency-specific graceful degradation remain. |
+| 33. Observability | Foundation | Safe structured request-failure logs carry operation/request identifiers. Metrics, tracing, alerts, health checks and operational dashboards are absent. |
+| 34. Database architecture | Partial | PostgreSQL migrations, constraints, foreign keys, indexes (including Search GIN indexes), RLS, transactions, file metadata and retention functions exist in code. Analytics reuses these tables and adds no migration. Migrations `0001`–`0016`, restricted runtime grants, selected collaboration/Search/analytics integration checks pass on disposable PostgreSQL 16 databases; a file-table RLS/API integration case was not found. Production validation/tuning, durable shared storage and queue architectures remain. |
+| 35. Frontend architecture | Partial | Next.js/React/TypeScript, server/client separation, API validation, loading/error states, responsive workflows and task-file controls exist. Error-boundary, cache/revalidation, performance and comprehensive accessibility requirements remain. |
+| 36. UI/UX design system | Partial | A consistent dark Nexora visual language, responsive layouts, forms, cards, navigation, focus and reduced-motion styles exist. The full component/state inventory, contrast audit and tablet/mobile acceptance remain. |
+| 37. Accessibility acceptance | Foundation | Semantic forms, labels, focus styles, reduced motion and keyboard status controls exist. Keyboard, screen-reader, contrast, focus-management and responsive behavior have not been formally verified. |
+| 38. Frontend performance | Foundation | Pagination and bounded lists exist, but measurable targets, profiling, code-splitting review and performance results do not. |
+| 39. Backend performance | Foundation | Pool sizing/timeouts, query limits and initial indexes exist; query/database benchmarks and production tuning do not. |
+| 40. Cost controls | Partial | Private uploads are capped at 10 MB each, 20 active files and 100 MB per task; upload requests are rate-limited. Organization-level storage budgets and usage/cost tracking remain. |
+| 41. Failure scenarios | Partial | APIs return bounded safe errors; optimistic conflicts, validation, idempotent retries, task-comment feedback and staged-file cleanup are covered. Database/SMTP outage, multi-instance storage, realtime/AI failures and operational recovery remain. |
+| 42. API idempotency | Partial | Task, milestone, comment and file upload creation use hashed keys, replay matching results, and reject key reuse with different payloads; replacement uses file-version preconditions. Other high-impact mutations and full contract documentation remain. |
+| 43. Engineering blueprint | Foundation | Architecture, threat model and per-section traceability are documented; API specifications, AI/realtime designs, scalability, deployment and recovery plans remain incomplete. |
+| 44. Development roadmap | Foundation | Immediate phases and next priorities are listed below; a complete schedule, owners, estimates and release gates remain to be defined. |
+
+## Immediate Priority
+
+1. Configure durable encrypted shared file storage and production monitoring, backups, trusted ingress, and the operator-managed retention schedule; nonce CSP is now present for application page responses. Local PostgreSQL 16 migration and integration checks are not production verification.
+2. Build the AI and authenticated realtime foundations only after their authorization, evaluation, cost, recovery and security boundaries are designed.
+3. Before production, verify SMTP, trusted-proxy/origin settings, CSP, encryption, operational monitoring, backup/recovery, accessibility and performance; complete retention/export/deletion policies.
+
+The local environment applied migrations `0001`–`0016` and runtime grants to separate `nexora` and disposable `nexora_test` PostgreSQL 16 databases. `nexora_app` was verified as non-superuser, non-owner, without `BYPASSRLS`, `CREATEROLE`, or `CREATEDB`. The current test/typecheck/build results and the remote-browser preview are recorded in the accompanying audit report. Database tests can write fixtures and must only use a disposable database. Browser preview checks are not formal accessibility acceptance. None of these checks constitutes production-readiness, accessibility certification, or an independent security assessment.
