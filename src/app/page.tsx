@@ -1,7 +1,7 @@
 export default function HomePage() {
   return (
     <main className="page-shell">
-      <header className="brand" aria-label="Nexora">
+      <header className="brand">
         <span className="brand-mark" aria-hidden="true">
           N
         </span>

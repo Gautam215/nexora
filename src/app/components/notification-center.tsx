@@ -177,7 +177,7 @@ export default function NotificationCenter({ organizationId }: { organizationId:
               <p className="eyebrow">Your workspace</p>
               <h1 id="notifications-title">Notifications</h1>
             </div>
-            <span className="notification-count" aria-label={`${unreadCount} unread notifications`}>{unreadCount} unread</span>
+            <span className="notification-count" aria-live="polite">{unreadCount} unread</span>
           </div>
           {error && <p className="form-message form-error" role="alert">{error}</p>}
           <section className="notification-preferences" aria-labelledby="notification-preferences-title">

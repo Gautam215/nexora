@@ -310,7 +310,7 @@ export default function ProjectMilestonesPage({
                       max={100}
                     />
                     {milestone.dependencies.length > 0 && (
-                      <div className="milestone-prerequisites" aria-label="Prerequisite milestones">
+                      <div className="milestone-prerequisites" role="group" aria-label="Prerequisite milestones">
                         <span>Depends on</span>
                         {milestone.dependencies.map((dependency) => (
                           <span className="milestone-prerequisite" key={dependency.id}>

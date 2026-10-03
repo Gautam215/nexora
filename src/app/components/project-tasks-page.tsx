@@ -712,7 +712,7 @@ export default function ProjectTasksPage({
             {loading && !tasks.length ? (
               <p className="workspace-loading" role="status">Loading tasks...</p>
             ) : view === "board" && statuses.length ? (
-              <div className="task-board" aria-label="Task workflow board">
+              <section className="task-board" aria-label="Task workflow board">
                 {statuses.map((status) => {
                   const columnTasks = tasks
                     .filter((task) => task.workflow_status_id === status.id)
@@ -766,9 +766,9 @@ export default function ProjectTasksPage({
                     </section>
                   );
                 })}
-              </div>
+              </section>
             ) : tasks.length ? (
-              <div className="task-list" aria-label="Project task list">
+              <section className="task-list" aria-label="Project task list">
                 {tasks.map((task) => (
                   <TaskCard
                     key={`${task.id}:${task.version}`}
@@ -794,7 +794,7 @@ export default function ProjectTasksPage({
                     onDragOver={() => undefined}
                   />
                 ))}
-              </div>
+              </section>
             ) : (
               <div className="project-empty task-empty">
                 <span className="empty-mark" aria-hidden="true">+</span>
@@ -976,7 +976,7 @@ function TaskCard({
       </div>
       <div className="task-card-title-row">
         <h4>{task.title}</h4>
-        {task.status_is_done && <span className="task-complete-mark" aria-label="Complete">Done</span>}
+        {task.status_is_done && <span className="task-complete-mark">Done</span>}
       </div>
       {task.description && <p className="task-card-description">{task.description}</p>}
       <div className="task-card-meta">
@@ -985,7 +985,7 @@ function TaskCard({
         {task.due_date && <span>Due {formatDate(task.due_date)}</span>}
       </div>
       {task.labels.length > 0 && (
-        <div className="task-label-list" aria-label="Labels">
+        <div className="task-label-list" role="group" aria-label="Labels">
           {task.labels.map((label) => <span className="task-label" key={label}>{label}</span>)}
         </div>
       )}
