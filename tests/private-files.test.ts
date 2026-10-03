@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { lstat, mkdtemp, rm, rmdir, stat, symlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -103,5 +103,43 @@ test("private storage uses private permissions, opaque keys, and safe deletion",
     if (previousDirectory === undefined) delete process.env.NEXORA_PRIVATE_FILE_DIR;
     else process.env.NEXORA_PRIVATE_FILE_DIR = previousDirectory;
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("private storage rejects a symlinked alias into public before creating directories", async () => {
+  const temporaryRoot = await mkdtemp(path.join(os.tmpdir(), "nexora-private-files-alias-"));
+  const alias = path.join(temporaryRoot, "project");
+  const projectRoot = process.cwd();
+  const publicRoot = path.join(projectRoot, "public");
+  const target = path.join(publicRoot, `private-files-${path.basename(temporaryRoot)}`);
+  const previousDirectory = process.env.NEXORA_PRIVATE_FILE_DIR;
+  let publicRootExisted = false;
+
+  try {
+    await lstat(publicRoot);
+    publicRootExisted = true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+
+  try {
+    await symlink(projectRoot, alias, "dir");
+    process.env.NEXORA_PRIVATE_FILE_DIR = path.join(alias, "public", path.basename(target));
+    await assert.rejects(
+      () => writePrivateFile("70000000-0000-4000-8000-000000000007", Buffer.from("must not be written")),
+      /dedicated directory outside public\//,
+    );
+    await assert.rejects(() => lstat(target), { code: "ENOENT" });
+    if (!publicRootExisted) await assert.rejects(() => lstat(publicRoot), { code: "ENOENT" });
+  } finally {
+    if (previousDirectory === undefined) delete process.env.NEXORA_PRIVATE_FILE_DIR;
+    else process.env.NEXORA_PRIVATE_FILE_DIR = previousDirectory;
+    await rm(target, { recursive: true, force: true });
+    if (!publicRootExisted) {
+      await rmdir(publicRoot).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "ENOENT" && error.code !== "ENOTEMPTY") throw error;
+      });
+    }
+    await rm(temporaryRoot, { recursive: true, force: true });
   }
 });

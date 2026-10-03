@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { NextRequest } from "next/server.js";
 import test from "node:test";
 import { emailSchema } from "../src/security/auth-schemas.ts";
-import { hasSameOrigin, jsonOk, parseJson } from "../src/server/api.ts";
+import { hasSameOrigin, jsonOk, jsonServerFailure, parseJson } from "../src/server/api.ts";
 
 const origin = "https://nexora.example.test";
 const runtimeEnvironment = process.env as unknown as Record<string, string | undefined>;
@@ -70,4 +70,19 @@ test("response body and header share a stable request identifier", async () => {
   assert.equal(response.headers.get("x-request-id"), "test-request-01");
   assert.equal(body.requestId, "test-request-01");
   assert.equal(response.headers.get("cache-control"), "no-store");
+  assert.equal(response.headers.get("access-control-allow-origin"), null);
+});
+
+test("serialization conflicts return a safe conflict response", async () => {
+  runtimeEnvironment.NODE_ENV = "test";
+  const request = new NextRequest(`${origin}/api`);
+  const response = jsonServerFailure(request, "test.update", {
+    code: "40001",
+    message: "database detail must not be returned",
+  });
+  const body = (await response.json()) as { error: { code: string; message: string } };
+
+  assert.equal(response.status, 409);
+  assert.equal(body.error.code, "CONCURRENT_UPDATE");
+  assert.doesNotMatch(body.error.message, /database detail/);
 });

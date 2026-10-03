@@ -30,6 +30,8 @@ test(
     const projectB = randomUUID();
     const milestoneB = randomUUID();
     const taskB = randomUUID();
+    const taskFileB = randomUUID();
+    const deletedTaskFileB = randomUUID();
     const independentTaskB = randomUUID();
     const commentB = randomUUID();
     const notificationDeduplicationNonce = randomUUID();
@@ -144,8 +146,23 @@ test(
       await client.query(
         `INSERT INTO nexora.project_memberships
          (organization_id, project_id, user_id, role, status, added_by_user_id)
-         VALUES ($1, $2, $3, 'manager', 'active', $3)`,
+          VALUES ($1, $2, $3, 'manager', 'active', $3)`,
         [orgB, projectB, userB],
+      );
+      await client.query(
+        `INSERT INTO nexora.task_files
+           (id, organization_id, project_id, task_id, original_filename, mime_type,
+            byte_size, sha256, storage_key, uploaded_by_user_id)
+         VALUES ($1, $2, $3, $4, 'private.txt', 'text/plain', 5, $5, $6, $7),
+                ($8, $2, $3, $4, 'deleted.txt', 'text/plain', 5, $5, $9, $7)`,
+        [taskFileB, orgB, projectB, taskB, "a".repeat(64), randomUUID(), userB,
+          deletedTaskFileB, randomUUID()],
+      );
+      await client.query(
+        `UPDATE nexora.task_files
+         SET deleted_at = pg_catalog.now(), deleted_by_user_id = $1
+         WHERE id = $2`,
+        [userB, deletedTaskFileB],
       );
       await setContext(userC);
       await client.query(
@@ -264,11 +281,12 @@ test(
          UNION ALL SELECT 'task' FROM nexora.tasks WHERE id IN ($7, $8)
           UNION ALL SELECT 'task_dependency' FROM nexora.task_dependencies WHERE task_id = $7
            UNION ALL SELECT 'task_comment' FROM nexora.task_comments WHERE id = $10
-           UNION ALL SELECT 'task_comment_mention' FROM nexora.task_comment_mentions WHERE comment_id = $10
-           UNION ALL SELECT 'notification' FROM nexora.notifications WHERE id = $11
-           UNION ALL SELECT 'idempotency' FROM nexora.project_mutation_idempotency WHERE key_hash = $9`,
-          [orgB, invitationB, auditB, sessionB, projectB, milestoneB, taskB, prerequisiteTaskB, idempotencyKeyHash, commentB, notificationB],
-       );
+            UNION ALL SELECT 'task_comment_mention' FROM nexora.task_comment_mentions WHERE comment_id = $10
+            UNION ALL SELECT 'notification' FROM nexora.notifications WHERE id = $11
+            UNION ALL SELECT 'task_file' FROM nexora.task_files WHERE id = $12
+            UNION ALL SELECT 'idempotency' FROM nexora.project_mutation_idempotency WHERE key_hash = $9`,
+           [orgB, invitationB, auditB, sessionB, projectB, milestoneB, taskB, prerequisiteTaskB, idempotencyKeyHash, commentB, notificationB, taskFileB],
+        );
       assert.equal(hiddenRows.rowCount, 0);
 
       await client.query("SAVEPOINT before_direct_notification_insert");
@@ -300,12 +318,44 @@ test(
         [notificationB],
       );
       assert.equal(ownNotification.rowCount, 1);
+      const visibleTaskFiles = await client.query(
+        "SELECT id FROM nexora.task_files WHERE id IN ($1, $2) ORDER BY id",
+        [taskFileB, deletedTaskFileB],
+      );
+      assert.deepEqual(visibleTaskFiles.rows.map((row) => row.id), [taskFileB]);
       const markOwnNotificationRead = await client.query(
         "UPDATE nexora.notifications SET read_at = pg_catalog.now() WHERE id = $1",
         [notificationB],
       );
       assert.equal(markOwnNotificationRead.rowCount, 1);
+      const viewerCannotUpdateFile = await client.query(
+        "UPDATE nexora.task_files SET version = version + 1 WHERE id = $1",
+        [taskFileB],
+      );
+      assert.equal(viewerCannotUpdateFile.rowCount, 0);
 
+      await client.query("SAVEPOINT before_viewer_file_insert");
+      await assert.rejects(
+        client.query(
+          `INSERT INTO nexora.task_files
+             (id, organization_id, project_id, task_id, original_filename, mime_type,
+              byte_size, sha256, storage_key, uploaded_by_user_id)
+           VALUES ($1, $2, $3, $4, 'viewer.txt', 'text/plain', 5, $5, $6, $7)`,
+          [randomUUID(), orgB, projectB, taskB, "b".repeat(64), randomUUID(), userC],
+        ),
+        (error: { code?: string }) => error.code === "42501",
+      );
+      await client.query("ROLLBACK TO SAVEPOINT before_viewer_file_insert");
+
+      await setContext(userB, orgB);
+      await client.query("SAVEPOINT before_task_file_hard_delete");
+      await assert.rejects(
+        client.query("DELETE FROM nexora.task_files WHERE id = $1", [taskFileB]),
+        (error: { code?: string }) => error.code === "42501",
+      );
+      await client.query("ROLLBACK TO SAVEPOINT before_task_file_hard_delete");
+
+      await setContext(userC, orgB);
       const attemptedMilestoneUpdate = await client.query(
         `UPDATE nexora.milestones SET name = 'Cross-tenant edit'
          WHERE organization_id = $1 AND project_id = $2 AND id = $3`,
