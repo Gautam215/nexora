@@ -1,54 +1,129 @@
 # Nexora
 
-Nexora is a new application built against `../uploads/nexora_prd_download.pdf` as its product contract. The existing `../reelscape` project is unrelated and is intentionally untouched.
+Nexora is a team project workspace for organizing projects, milestones, tasks, and collaboration in one tenant-scoped product. PostgreSQL is authoritative for accounts, workspaces, projects, and work-item data. The uploaded product requirements document is the product contract; it is not required to build or run this repository.
 
-## Current State
+This repository is an actively developed local foundation, not a production-ready service. AI and real-time collaboration are not implemented. The current file backend is a private local filesystem and needs durable encrypted shared storage before a multi-instance deployment.
 
-Nexora has real account and organization workflows plus PostgreSQL-backed projects, milestones, tasks, Kanban, task activity, append-only comments, mentions, notifications, private task attachments, permission-aware workspace Search, and a project analytics dashboard. Owners/admins can invite verified-email-bound workspace members, revoke invitations, change roles, and disable or restore membership; project managers can manage project details and access without changing workspace membership. Project/work-item workflows use PostgreSQL, RLS, optimistic versions, transactions, audit events, and idempotent creation. Search covers visible projects, active tasks, comments, active members and active file names; its full-text indexes are in `0013_authorized_search.sql`. Project analytics are calculated from authorized task, milestone, membership, and audit data without a schema migration. Migrations `0011`–`0016`, runtime grants, and database-backed collaboration/Search/analytics checks have been verified locally against PostgreSQL 16; the full test suite, typecheck, and production build pass. This is local verification only, not production-readiness evidence. AI, realtime, and production operational controls remain future work.
+## Included
 
-See:
+- Accounts with email verification, password reset, opaque database-backed sessions, and rate limits.
+- Organization and project roles, verified-email invitations, membership controls, and tenant-aware PostgreSQL row-level security.
+- Projects, milestones, tasks, configurable workflows, Kanban/list views, comments, mentions, activity, and in-app notifications.
+- Private task attachments with content validation, scoped access, short-lived signed downloads, version-checked replacement, and 30-day retention logic.
+- Permission-aware workspace search and project analytics calculated from authorized PostgreSQL data.
 
-- `docs/prd-traceability.md` for status against every PRD section and the next phases.
-- `docs/architecture.md` for current choices and boundaries.
-- `docs/threat-model.md` for threats, controls, verification, and residual risk.
+AI-generated insights, email notification delivery, presence, and WebSocket synchronization are not available. Analytics are deterministic summaries, not AI predictions.
 
-## Local Requirements
+## Architecture at a Glance
+
+```mermaid
+flowchart LR
+  browser[Browser on APP_ORIGIN] -->|same-origin pages and API| web[Next.js application]
+  web --> session[Verified session and input checks]
+  session --> tenant[Organization context and role checks]
+  tenant -->|restricted runtime role plus RLS| db[(PostgreSQL)]
+  tenant -->|opaque keys only| files[(Private file directory)]
+  web -->|verification, recovery, invitations| smtp[Configured SMTP provider]
+  deploy[Migration operator] -->|separate migration credentials| db
+```
+
+For project data, identity and tenant context are set inside each database transaction. PostgreSQL RLS is a second boundary, not a replacement for the server-side membership and role checks. The browser never receives database credentials or file storage keys.
+
+```mermaid
+flowchart LR
+  upload[Same-origin file upload] --> validate[Authorize, rate-limit, bound and validate bytes]
+  validate --> stage[Write opaque object outside public/]
+  stage --> metadata[Commit metadata, audit and idempotency state]
+  metadata --> dto[Return safe file metadata]
+  link[Authenticated download request] --> token[Issue short-lived user/file/version token]
+  token --> verify[Recheck membership, file state and version]
+  verify --> hash[Read private object and verify SHA-256]
+  hash --> attachment[Stream as a non-cacheable attachment]
+```
+
+## Requirements
 
 - Node.js 22 or newer.
 - PostgreSQL 16 or newer.
-- Separate PostgreSQL roles for migrations and runtime. The runtime role must not own tables and must not have `SUPERUSER`, `BYPASSRLS`, or `CREATEROLE`.
+- Two separate PostgreSQL roles: a migration owner and a restricted runtime role. The runtime role must not own application tables and must not have `SUPERUSER`, `BYPASSRLS`, `CREATEDB`, or `CREATEROLE`.
 
-Install the pinned dependencies, provision the two roles, and apply `db/runtime-grants.sql` as the migration owner. `MIGRATOR_DATABASE_URL` must use the migration role; `DATABASE_URL` must use the restricted runtime role. Copy `.env.example` to a local-only environment file and replace its placeholders. Never use a production credential in local development.
-
-Set `APP_ORIGIN`, a random `AUTH_RATE_LIMIT_HMAC_KEY` (at least 32 bytes), and working SMTP values before using account flows. Email delivery requires TLS by default. In production, also set `NEXORA_TRUSTED_CLIENT_IP_HEADER` to a single-IP header overwritten by the trusted ingress; the application deliberately fails closed if it is missing or invalid. Do not trust a client-supplied `X-Forwarded-For` chain.
-
-Private task attachments use a server-only filesystem directory (`NEXORA_PRIVATE_FILE_DIR`, default `.private-files`) and a separate signing key (`NEXORA_FILE_SIGNING_KEY`, at least 32 random bytes). Keep the directory outside `public/`, persist and encrypt it at rest in deployments, and mount the same directory for the app and cleanup process. Signed download links expire after five minutes. Uploads accept PDF, plain text, Markdown, CSV, JSON, PNG, JPEG, GIF, and WebP after extension, declared MIME, and content checks; each file is limited to 10 MB, with at most 20 active attachments and 100 MB per task. Files are downloaded as attachments, never rendered inline. Deleted files become inaccessible immediately and are physically purged after 30 days.
-
-Commands:
+Install dependencies and create a local environment file:
 
 ```sh
-npm install
+npm ci
+cp .env.example .env.local
+```
+
+Generate distinct secrets for `AUTH_RATE_LIMIT_HMAC_KEY` and `NEXORA_FILE_SIGNING_KEY` with `openssl rand -hex 32`. Keep `.env.local` out of version control and never use production credentials for development or tests.
+
+Create the local database roles and database using an administrative PostgreSQL account. Replace the example passwords with strong, unique values:
+
+```sql
+CREATE ROLE nexora_migrator LOGIN PASSWORD 'replace-this-migrator-password'
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
+CREATE ROLE nexora_app LOGIN PASSWORD 'replace-this-runtime-password'
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
+CREATE DATABASE nexora OWNER nexora_migrator;
+GRANT CONNECT ON DATABASE nexora TO nexora_app;
+```
+
+Set `MIGRATOR_DATABASE_URL` to the database using `nexora_migrator` and `DATABASE_URL` to the same database using `nexora_app`. Then apply migrations and the runtime grants:
+
+```sh
 npm run db:migrate
-npm test
-npm run typecheck
+psql "$MIGRATOR_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/runtime-grants.sql
 npm run dev
 ```
 
-Schedule `npm run files:cleanup` at least daily using the runtime database role and the same private storage mount. It permanently deletes files past the 30-day retention window and removes unreferenced storage objects older than 24 hours. The filesystem backend is private to this deployment; production must provide durable encrypted storage, and multiple app instances must share that storage. Malware scanning is optional in the PRD and is not configured; do not process uploaded documents as trusted input.
+The migration runner uses an advisory lock, applies each numbered migration transactionally, records SHA-256 checksums, and refuses changes to applied migrations. Add a new migration for every schema or policy change. Apply `db/runtime-grants.sql` as the migration owner after migrations on each database.
 
-To run PostgreSQL integration tests, apply all migrations to a disposable test database and set `NEXORA_TEST_DATABASE_URL` to that database using the restricted runtime role. Keep it separate from `DATABASE_URL`; tests create records and may leave them behind. Never point it at production or other persistent data.
+The Node-based migration, test, and file-cleanup scripts load `.env.local` when it exists; variables already present in the process environment take precedence. Next.js loads the same file for app commands.
+
+## Configuration
+
+`.env.example` documents the supported settings. In addition to the database URLs and secrets:
+
+- Set `APP_ORIGIN` to the canonical browser origin used by same-origin mutation checks and account links.
+- Configure SMTP for verification, recovery, and invitations. TLS is required by default; `SMTP_REQUIRE_TLS=false` is for controlled local-only testing.
+- Set `NEXORA_PRIVATE_FILE_DIR` to a dedicated server-only directory outside `public/`. Production needs durable encrypted storage shared by app and cleanup instances.
+- In production, set `NEXORA_TRUSTED_CLIENT_IP_HEADER` to one client-IP header overwritten by a trusted ingress. Do not trust a client-supplied `X-Forwarded-For` chain.
+- Keep `MIGRATOR_DATABASE_URL` separate from the restricted runtime `DATABASE_URL`; never expose either to the browser.
+- The browser application and API are same-origin only. No CORS allow-origin response header is enabled; do not add a wildcard or credentialed cross-origin policy at the app or ingress.
+
+File uploads are limited to 10 MiB each, 20 active files and 100 MiB per task. Deleted files become inaccessible immediately and are physically purged after 30 days. Schedule `npm run files:cleanup` at least daily with the restricted runtime role and the same private storage mount. The command is provided, but the repository does not configure or monitor a scheduler. Optional malware scanning is not configured; uploaded documents must not be treated as trusted input.
+
+## Checks
 
 ```sh
-MIGRATOR_DATABASE_URL="postgresql://nexora_migrator:...@localhost:5432/nexora_test" npm run db:migrate
-NEXORA_TEST_DATABASE_URL="postgresql://nexora_app:...@localhost:5432/nexora_test" npm test
+npm run lint
+npm run typecheck
+npm test
+npm run check
+npm run build
 ```
 
-The migration runner serializes concurrent runs with a PostgreSQL advisory lock, applies each migration transactionally, records a SHA-256 checksum, and refuses edits to an applied migration. Add a new numbered migration for every schema change. The lockfile and a clean dependency audit are present, but must be checked again before deployment.
+`npm run check` runs lint, typecheck, and tests. PostgreSQL integration cases run only when `NEXORA_TEST_DATABASE_URL` is configured; without it, those cases are skipped. For full local verification, create a disposable `nexora_test` database with the same separate roles, set `NEXORA_TEST_MIGRATOR_DATABASE_URL` and `NEXORA_TEST_DATABASE_URL` in `.env.local`, then run:
 
-## Tenant Access Rule
+```sh
+MIGRATOR_DATABASE_URL="$NEXORA_TEST_MIGRATOR_DATABASE_URL" npm run db:migrate
+psql "$NEXORA_TEST_MIGRATOR_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/runtime-grants.sql
+npm run check
+```
 
-Tenant-aware server code must derive `userId` from a verified server-side session, then use `withOrganizationContext(userId, organizationId, callback, minimumRole)`. That function starts a transaction, sets transaction-local identity, reads only the caller's own membership, rejects missing/inactive/insufficient membership, and only then sets the organization context and invokes the callback. Do not accept a user ID or role from request data. Use parameterized SQL only.
+The database test suite writes fixture rows and must never point to production or persistent user data. The `.env.example` values are placeholders, not working credentials.
 
-The database runtime role is a separate principal from the migration owner. RLS is a defense-in-depth boundary, not a substitute for authorization in application services. Tenant-aware server code must derive identity only from a verified session. Initial owner membership and the `organization.created` audit event share the organization-creation transaction.
+## Security Boundaries
 
-Authentication cookies are host-only, `HttpOnly`, `SameSite=Strict`, and `Secure` in production; only SHA-256 token hashes are stored for sessions and email links. Invitation acceptance requires the verified address matching the invited address; the one-time token is removed from the URL and kept in tab-scoped storage during sign-in. Mutation APIs require the canonical origin and reject cross-site Fetch Metadata. Apply the same sequence to every new tenant feature: schema and RLS first, then authorization-aware APIs, integration tests, and user-facing UI. The current project API is covered by its project schema, project-level RLS, and live PostgreSQL tests.
+Tenant-aware server code must derive identity from a verified server-side session and use `withOrganizationContext(userId, organizationId, callback, minimumRole)`. Do not accept user IDs or roles from request data. Use parameterized SQL and keep each tenant operation inside the helper's transaction. RLS is defense in depth, not a replacement for application authorization.
+
+Authentication cookies are host-only, `HttpOnly`, `SameSite=Strict`, and `Secure` in production. Session and email-link tokens are stored as hashes. Mutations require the canonical origin and reject cross-site Fetch Metadata. Task files stay outside public paths; API responses never expose storage keys. See `docs/threat-model.md` for current controls and residual risks.
+
+Nexora does not enable cross-origin API access: JSON responses do not include `Access-Control-Allow-Origin`, and mutation handlers require the configured `APP_ORIGIN`. CORS is not authentication; an ingress must not add wildcard CORS headers or credentialed access from untrusted sites.
+
+## Project Notes
+
+- `docs/prd-traceability.md` tracks implementation and verification against all 45 PRD sections.
+- `docs/architecture.md` documents system boundaries, API behavior, and deferred infrastructure.
+- `docs/threat-model.md` records threats, current controls, verification, and remaining deployment risks.
+
+Local tests, a successful production build, and this documentation are not evidence of production readiness, regulatory compliance, accessibility certification, performance capacity, or an independent security assessment. Configure backups and restore tests, monitoring, encrypted shared storage, SMTP, trusted ingress, and an operational cleanup schedule before launch.

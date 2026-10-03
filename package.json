@@ -9,11 +9,13 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "lint": "biome lint src tests scripts",
+    "check": "npm run lint && npm run typecheck && npm test",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test": "node --conditions=react-server --experimental-strip-types --test tests/*.test.ts tests/*.test.mjs",
-    "db:migrate": "node scripts/migrate.mjs",
-    "files:cleanup": "node --conditions=react-server --experimental-strip-types scripts/cleanup-task-files.mjs"
+    "test": "node --import=./scripts/load-env.mjs --conditions=react-server --experimental-strip-types --test tests/*.test.ts tests/*.test.mjs",
+    "db:migrate": "node --import=./scripts/load-env.mjs scripts/migrate.mjs",
+    "files:cleanup": "node --import=./scripts/load-env.mjs --conditions=react-server --experimental-strip-types scripts/cleanup-task-files.mjs"
   },
   "dependencies": {
     "next": "16.3.6",
@@ -25,6 +27,7 @@
     "zod": "4.6.5"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.15",
     "@types/node": "22.10.2",
     "@types/pg": "8.15.5",
     "@types/react": "19.0.2",
