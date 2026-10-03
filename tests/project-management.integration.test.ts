@@ -33,6 +33,7 @@ import {
   POST as createTask,
 } from "../src/app/api/organizations/[organizationId]/projects/[projectId]/tasks/route.ts";
 import {
+  DELETE as archiveTask,
   GET as getTask,
   PATCH as updateTask,
 } from "../src/app/api/organizations/[organizationId]/projects/[projectId]/tasks/[taskId]/route.ts";
@@ -278,6 +279,102 @@ test(
     const milestoneCollectionPath = `/api/organizations/${organizationId}/projects/${projectId}/milestones`;
     const taskCollectionPath = `/api/organizations/${organizationId}/projects/${projectId}/tasks`;
     let memberTaskId = "";
+    const searchProjectEntity = (
+      cookie: string,
+      query: string,
+      type: "task" | "comment" | "member" | "file",
+    ) => withTrustedClientIp((headerName) =>
+      searchOrganization(
+        apiRequest(
+          `/api/organizations/${organizationId}/search?${new URLSearchParams({ q: query, type, projectId })}`,
+          "GET",
+          undefined,
+          cookie,
+          { [headerName]: "203.0.113.12" },
+        ),
+        { params: Promise.resolve({ organizationId }) },
+      ),
+    );
+    const searchWorkspaceAll = (cookie: string) => withTrustedClientIp((headerName) =>
+      searchOrganization(
+        apiRequest(
+          `/api/organizations/${organizationId}/search?q=Search`,
+          "GET",
+          undefined,
+          cookie,
+          { [headerName]: "203.0.113.14" },
+        ),
+        { params: Promise.resolve({ organizationId }) },
+      ),
+    );
+
+    const searchFixtureTaskResponse = await createTask(
+      apiRequest(
+        taskCollectionPath,
+        "POST",
+          { title: "Search Task Marker" },
+        owner.cookie,
+        { "idempotency-key": "search-visibility-task-001" },
+      ),
+      projectParams,
+    );
+    assert.equal(searchFixtureTaskResponse.status, 201, await searchFixtureTaskResponse.clone().text());
+    const searchFixtureTaskBody = (await searchFixtureTaskResponse.json()) as {
+      data: { task: { id: string } };
+    };
+    const searchFixtureTaskId = searchFixtureTaskBody.data.task.id;
+    const searchFixtureTaskParams = {
+      params: Promise.resolve({ organizationId, projectId, taskId: searchFixtureTaskId }),
+    };
+    const searchFixtureFileResponse = await withTrustedClientIp((headerName) =>
+      uploadTaskFile(
+        privateFileRequest(
+          `${taskCollectionPath}/${searchFixtureTaskId}/files`,
+          "POST",
+          Buffer.from("Search visibility fixture\n", "utf8"),
+          "Search File Marker.txt",
+          owner.cookie,
+          { "idempotency-key": "search-visibility-file-001", [headerName]: "203.0.113.13" },
+        ),
+        searchFixtureTaskParams,
+      ),
+    );
+    assert.equal(searchFixtureFileResponse.status, 201, await searchFixtureFileResponse.clone().text());
+    const searchFixtureCommentResponse = await createTaskComment(
+      apiRequest(
+        `${taskCollectionPath}/${searchFixtureTaskId}/comments`,
+        "POST",
+        { body: "Search Comment Marker" },
+        owner.cookie,
+        { "idempotency-key": "search-visibility-comment-001" },
+      ),
+      searchFixtureTaskParams,
+    );
+    assert.equal(searchFixtureCommentResponse.status, 201, await searchFixtureCommentResponse.clone().text());
+
+    const searchVisibilityCases = [
+      ["task", "Search"],
+      ["comment", "Search"],
+      ["file", "Search"],
+      ["member", "Teammate"],
+    ] as const;
+    const hiddenAllSearch = await searchWorkspaceAll(member.cookie);
+    assert.equal(hiddenAllSearch.status, 200, await hiddenAllSearch.clone().text());
+    assert.deepEqual(
+      ((await hiddenAllSearch.json()) as { data: { results: unknown[] } }).data.results,
+      [],
+      "unfiltered all-type search must not expose inaccessible project results",
+    );
+    for (const [type, query] of searchVisibilityCases) {
+      const hiddenSearch = await searchProjectEntity(member.cookie, query, type);
+      assert.equal(hiddenSearch.status, 200, await hiddenSearch.clone().text());
+      const hiddenSearchBody = (await hiddenSearch.json()) as {
+        data: { results: Array<{ id: string }>; pagination: { total: number } };
+      };
+      assert.equal(hiddenSearchBody.data.pagination.total, 0, `unassigned member must not find ${type} results`);
+      assert.deepEqual(hiddenSearchBody.data.results, []);
+    }
+
     assert.equal(createdBody.data.project.status, "planned");
     assert.equal(createdBody.data.project.owner_user_id, owner.userId);
     assert.equal(createdBody.data.project.version, 1);
@@ -321,6 +418,42 @@ test(
       { params: Promise.resolve({ organizationId, projectId }) },
     );
     assert.equal(assigned.status, 201);
+    const visibleAllSearch = await searchWorkspaceAll(member.cookie);
+    assert.equal(visibleAllSearch.status, 200, await visibleAllSearch.clone().text());
+    const visibleAllSearchBody = (await visibleAllSearch.json()) as {
+      data: { results: Array<{ entity_type: string }> };
+    };
+    assert.deepEqual(
+      visibleAllSearchBody.data.results.map((result) => result.entity_type).sort(),
+      ["comment", "file", "task"],
+      "unfiltered all-type search should combine accessible project sources",
+    );
+    for (const [type, query] of searchVisibilityCases) {
+      const visibleSearch = await searchProjectEntity(member.cookie, query, type);
+      assert.equal(visibleSearch.status, 200, await visibleSearch.clone().text());
+      const visibleSearchBody = (await visibleSearch.json()) as {
+        data: {
+          results: Array<{ entity_type: string; id: string }>;
+          pagination: { total: number };
+        };
+      };
+      assert.equal(visibleSearchBody.data.pagination.total, 1, `project member should find ${type} result`);
+      assert.equal(visibleSearchBody.data.results[0]?.entity_type, type);
+      if (type === "member") {
+        assert.equal(visibleSearchBody.data.results[0]?.id, member.userId);
+        assert.equal(JSON.stringify(visibleSearchBody.data).includes(invitedEmail), false);
+      }
+    }
+    const archivedSearchFixture = await archiveTask(
+      apiRequest(
+        `${taskCollectionPath}/${searchFixtureTaskId}`,
+        "DELETE",
+        { expectedVersion: 1 },
+        owner.cookie,
+      ),
+      searchFixtureTaskParams,
+    );
+    assert.equal(archivedSearchFixture.status, 200, await archivedSearchFixture.clone().text());
     const visibleProject = await getProject(
       apiRequest(`/api/organizations/${organizationId}/projects/${projectId}`, "GET", undefined, member.cookie),
       { params: Promise.resolve({ organizationId, projectId }) },
