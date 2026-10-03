@@ -14,7 +14,11 @@ import {
 } from "../../../../../../../../../server/api.ts";
 import { getAuthPrincipal } from "../../../../../../../../../server/auth.ts";
 import { isRateLimited } from "../../../../../../../../../server/auth-rate-limit.ts";
-import { withOrganizationContext, type DatabaseTransaction } from "../../../../../../../../../server/db.ts";
+import {
+  TransactionCommitOutcomeUnknown,
+  withOrganizationContext,
+  type DatabaseTransaction,
+} from "../../../../../../../../../server/db.ts";
 import { notifyProjectMembers } from "../../../../../../../../../server/project-notifications.ts";
 import { lockProjectForWork, lockProjectTaskGraph } from "../../../../../../../../../server/project-work.ts";
 import { readTaskFileScope, taskFileWriteBlock } from "../../../../../../../../../server/task-file-access.ts";
@@ -271,7 +275,9 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       stagedStorageKey = null;
       return jsonOk(request, { file: result.file }, 201);
     } catch (error) {
-      if (stagedStorageKey) await removePrivateFile(stagedStorageKey).catch(() => undefined);
+      if (stagedStorageKey && !(error instanceof TransactionCommitOutcomeUnknown)) {
+        await removePrivateFile(stagedStorageKey).catch(() => undefined);
+      }
       throw error;
     }
   } catch (error) {

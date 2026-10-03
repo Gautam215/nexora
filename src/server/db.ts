@@ -16,6 +16,16 @@ export class OrganizationAccessDenied extends Error {
   }
 }
 
+export class TransactionCommitOutcomeUnknown extends Error {
+  readonly cause: unknown;
+
+  constructor(cause: unknown) {
+    super("The database commit outcome is unknown");
+    this.name = "TransactionCommitOutcomeUnknown";
+    this.cause = cause;
+  }
+}
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const globalForDatabase = globalThis as typeof globalThis & {
   nexoraPool?: Pool;
@@ -56,11 +66,14 @@ async function inTransaction<T>(work: (client: PoolClient) => Promise<T>): Promi
     await client.query("BEGIN");
     transactionStarted = true;
     const result = await work(client);
-    await client.query("COMMIT");
+    await commitDatabaseTransaction(client);
     transactionStarted = false;
     return result;
   } catch (error) {
-    if (transactionStarted) {
+    if (error instanceof TransactionCommitOutcomeUnknown) {
+      transactionStarted = false;
+      releaseError = error;
+    } else if (transactionStarted) {
       try {
         await client.query("ROLLBACK");
       } catch (rollbackError) {
@@ -70,6 +83,23 @@ async function inTransaction<T>(work: (client: PoolClient) => Promise<T>): Promi
     throw error;
   } finally {
     client.release(releaseError);
+  }
+}
+
+export async function commitDatabaseTransaction(transaction: DatabaseTransaction): Promise<void> {
+  try {
+    await transaction.query("COMMIT");
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      typeof error.code === "string" &&
+      /^[0-9A-Z]{5}$/.test(error.code)
+    ) {
+      throw error;
+    }
+    throw new TransactionCommitOutcomeUnknown(error);
   }
 }
 

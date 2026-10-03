@@ -19,6 +19,8 @@ GRANT EXECUTE ON FUNCTION nexora.enqueue_project_notification(uuid, uuid, uuid, 
 GRANT EXECUTE ON FUNCTION nexora.purge_expired_task_files() TO nexora_app;
 GRANT EXECUTE ON FUNCTION nexora.list_unreferenced_task_file_keys(uuid[]) TO nexora_app;
 GRANT EXECUTE ON FUNCTION nexora.searchable_task_labels(text[]) TO nexora_app;
+GRANT EXECUTE ON FUNCTION nexora.lock_project_dependency_graph(uuid, uuid, text) TO nexora_app;
+GRANT EXECUTE ON FUNCTION nexora.lock_active_task_file_for_download(uuid, uuid, uuid, uuid) TO nexora_app;
 GRANT USAGE ON TYPE
   nexora.user_status,
   nexora.organization_status,
@@ -42,6 +44,7 @@ REVOKE ALL PRIVILEGES ON TABLE
   nexora.milestones,
   nexora.milestone_dependencies,
   nexora.project_mutation_idempotency,
+  nexora.project_dependency_graph_locks,
   nexora.project_task_statuses,
   nexora.tasks,
   nexora.task_dependencies,

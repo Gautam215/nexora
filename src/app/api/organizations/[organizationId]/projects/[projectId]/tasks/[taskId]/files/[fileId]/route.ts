@@ -2,7 +2,6 @@ import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import type { NextRequest } from "next/server";
 import {
   MAX_TASK_FILE_BYTES,
-  MAX_TASK_FILE_COUNT,
   PRIVATE_FILE_LINK_TTL_SECONDS,
   createPrivateFileToken,
   readBoundedFileBody,
@@ -12,7 +11,11 @@ import {
 import { hasSameOrigin, jsonError, jsonOk, jsonServerFailure } from "../../../../../../../../../../server/api.ts";
 import { getAuthPrincipal } from "../../../../../../../../../../server/auth.ts";
 import { isRateLimited, isTokenRateLimited } from "../../../../../../../../../../server/auth-rate-limit.ts";
-import { withOrganizationContext, type DatabaseTransaction } from "../../../../../../../../../../server/db.ts";
+import {
+  TransactionCommitOutcomeUnknown,
+  withOrganizationContext,
+  type DatabaseTransaction,
+} from "../../../../../../../../../../server/db.ts";
 import { notifyProjectMembers } from "../../../../../../../../../../server/project-notifications.ts";
 import { lockProjectForWork, lockProjectTaskGraph } from "../../../../../../../../../../server/project-work.ts";
 import { readTaskFileScope, taskFileWriteBlock } from "../../../../../../../../../../server/task-file-access.ts";
@@ -21,7 +24,6 @@ import {
   privateFileSigningKey,
   publicTaskFile,
   requestedPrivateFilename,
-  type PublicTaskFile,
   type TaskFileRecord,
 } from "../../../../../../../../../../server/task-files.ts";
 import { readPrivateFile, removePrivateFile, writePrivateFile } from "../../../../../../../../../../server/private-file-storage.ts";
@@ -45,7 +47,7 @@ async function readActiveFile(
   projectId: string,
   taskId: string,
   fileId: string,
-  lock = false,
+  lock: "share" | "update" | false = false,
 ): Promise<TaskFileRecord | null> {
   const result = await transaction.query<TaskFileRecord>(
     `SELECT id, organization_id, project_id, task_id, original_filename,
@@ -55,7 +57,7 @@ async function readActiveFile(
      FROM nexora.task_files
      WHERE organization_id = $1 AND project_id = $2 AND task_id = $3
        AND id = $4 AND deleted_at IS NULL
-     ${lock ? "FOR UPDATE" : ""}`,
+      ${lock ? `FOR ${lock.toUpperCase()}` : ""}`,
     [organizationId, projectId, taskId, fileId],
   );
   return result.rows[0] ?? null;
@@ -106,24 +108,30 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
         async (transaction) => {
           const scope = await readTaskFileScope(transaction, organizationId, projectId, taskId);
           if (scope.kind === "not_found") return null;
-          const file = await readActiveFile(transaction, organizationId, projectId, taskId, fileId);
-          return file?.version === claims.version ? file : null;
+          const lockedFile = await transaction.query<TaskFileRecord>(
+            `SELECT *
+             FROM nexora.lock_active_task_file_for_download($1, $2, $3, $4)`,
+            [organizationId, projectId, taskId, fileId],
+          );
+          const file = lockedFile.rows[0] ?? null;
+          if (!file || file.version !== claims.version) return null;
+          const bytes = await readPrivateFile(file.storage_key, Number(file.byte_size));
+          const digest = createHash("sha256").update(bytes).digest("hex");
+          if (!sameDigest(digest, file.sha256)) throw new Error("Private file integrity check failed");
+          return { file, bytes };
         },
         "guest",
       );
       if (!authorized) return jsonError(request, 404, "FILE_NOT_FOUND", "This private file is no longer available.");
-
-      const bytes = await readPrivateFile(authorized.storage_key, Number(authorized.byte_size));
-      const digest = createHash("sha256").update(bytes).digest("hex");
-      if (!sameDigest(digest, authorized.sha256)) throw new Error("Private file integrity check failed");
+      const bytes = authorized.bytes;
       return new Response(bytes, {
         status: 200,
         headers: {
           "cache-control": "private, no-store",
-          "content-disposition": privateFileContentDisposition(authorized.original_filename),
+          "content-disposition": privateFileContentDisposition(authorized.file.original_filename),
           "content-length": String(bytes.byteLength),
           "content-security-policy": "sandbox; default-src 'none'; script-src 'none'; style-src 'none'",
-          "content-type": authorized.mime_type,
+          "content-type": authorized.file.mime_type,
           "referrer-policy": "no-referrer",
           "x-request-id": responseRequestId(request),
           "x-content-type-options": "nosniff",
@@ -226,7 +234,7 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
           if (scope.kind === "not_found") return { kind: "not_found" as const };
           const block = taskFileWriteBlock(scope);
           if (block) return { kind: block };
-          const current = await readActiveFile(transaction, organizationId, projectId, taskId, fileId, true);
+          const current = await readActiveFile(transaction, organizationId, projectId, taskId, fileId, "update");
           if (!current) return { kind: "file_not_found" as const };
           if (current.version !== expectedVersion) return { kind: "version_conflict" as const };
 
@@ -294,7 +302,9 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
       stagedStorageKey = null;
       return jsonOk(request, { file: result.file });
     } catch (error) {
-      if (stagedStorageKey) await removePrivateFile(stagedStorageKey).catch(() => undefined);
+      if (stagedStorageKey && !(error instanceof TransactionCommitOutcomeUnknown)) {
+        await removePrivateFile(stagedStorageKey).catch(() => undefined);
+      }
       throw error;
     }
   } catch (error) {
@@ -322,7 +332,7 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
         if (scope.kind === "not_found") return { kind: "not_found" as const };
         const block = taskFileWriteBlock(scope);
         if (block) return { kind: block };
-        const current = await readActiveFile(transaction, organizationId, projectId, taskId, fileId, true);
+        const current = await readActiveFile(transaction, organizationId, projectId, taskId, fileId, "update");
         if (!current) return { kind: "file_not_found" as const };
         await transaction.query(
           `UPDATE nexora.task_files

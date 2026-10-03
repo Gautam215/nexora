@@ -85,6 +85,19 @@ export function jsonServerFailure(
   operation: string,
   error: unknown,
 ): NextResponse {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "40001"
+  ) {
+    return jsonError(
+      request,
+      409,
+      "CONCURRENT_UPDATE",
+      "The project changed while this request was being processed. Refresh and try again.",
+    );
+  }
   if (error instanceof OrganizationAccessDenied) {
     return jsonError(
       request,

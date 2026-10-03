@@ -1,6 +1,7 @@
 import "server-only";
 import { constants } from "node:fs";
-import { chmod, lstat, mkdir, open, readdir, unlink } from "node:fs/promises";
+import type { Dirent } from "node:fs";
+import { chmod, lstat, mkdir, open, readdir, realpath, unlink } from "node:fs/promises";
 import path from "node:path";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -21,8 +22,46 @@ export function privateFileRoot(): string {
   return root;
 }
 
-async function ensurePrivateRoot(): Promise<string> {
+async function resolveExistingPath(target: string): Promise<string> {
+  let current = target;
+  const missingSegments: string[] = [];
+  while (true) {
+    try {
+      return path.resolve(await realpath(current), ...missingSegments);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      const parent = path.dirname(current);
+      if (parent === current) throw error;
+      missingSegments.unshift(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
+function isPathWithin(candidate: string, directory: string): boolean {
+  const relative = path.relative(directory, candidate);
+  return relative === "" || (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+async function validatedPrivateFileRoot(): Promise<string> {
   const root = privateFileRoot();
+  const projectRoot = await realpath(path.resolve(/*turbopackIgnore: true*/ process.cwd()));
+  const [canonicalRoot, canonicalPublicRoot] = await Promise.all([
+    resolveExistingPath(root),
+    resolveExistingPath(path.join(projectRoot, "public")),
+  ]);
+  if (
+    canonicalRoot === path.parse(canonicalRoot).root ||
+    canonicalRoot === projectRoot ||
+    isPathWithin(canonicalRoot, canonicalPublicRoot)
+  ) {
+    throw new Error("Private file storage must use a dedicated directory outside public/");
+  }
+  return canonicalRoot;
+}
+
+async function ensurePrivateRoot(): Promise<string> {
+  const root = await validatedPrivateFileRoot();
   await mkdir(root, { recursive: true, mode: 0o700 });
   const info = await lstat(root);
   if (!info.isDirectory() || info.isSymbolicLink()) {
@@ -66,7 +105,7 @@ export async function readPrivateFile(storageKey: string, maxBytes: number): Pro
 }
 
 export async function removePrivateFile(storageKey: string): Promise<void> {
-  const target = objectPath(privateFileRoot(), storageKey);
+  const target = objectPath(await validatedPrivateFileRoot(), storageKey);
   try {
     await unlink(target);
   } catch (error) {
@@ -75,8 +114,8 @@ export async function removePrivateFile(storageKey: string): Promise<void> {
 }
 
 export async function listStalePrivateFileKeys(olderThan: Date): Promise<string[]> {
-  const root = privateFileRoot();
-  let entries;
+  const root = await validatedPrivateFileRoot();
+  let entries: Dirent[];
   try {
     entries = await readdir(/*turbopackIgnore: true*/ root, { withFileTypes: true });
   } catch (error) {
