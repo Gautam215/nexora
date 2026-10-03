@@ -1471,7 +1471,7 @@ function formatDateTime(value: string): string {
 
 function formatActivity(activity: TaskActivity): string {
   if (activity.action === "task.created") return "Created this task";
-  if (activity.action === "task.comment_created") return "Added a comment";
+  if (activity.action === "task.comment_created" || activity.action === "comment.added") return "Added a comment";
   if (activity.action === "task.file_uploaded") return "Attached a file";
   if (activity.action === "task.file_replaced") return "Replaced an attachment";
   if (activity.action === "task.file_deleted") return "Removed an attachment";

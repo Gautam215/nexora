@@ -138,9 +138,11 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
         const task = await readProjectTask(transaction, organizationId, projectId, taskId);
         if (!task) return null;
         const activity = await transaction.query(
-          `SELECT event.id,
-                  event.action,
-                  event.details,
+           `SELECT event.id,
+                   CASE WHEN event.action = 'task.comment_created' THEN 'comment.added'
+                        ELSE event.action
+                   END AS action,
+                   event.details,
                   event.created_at,
                   actor.display_name AS actor_name
            FROM nexora.audit_events AS event
