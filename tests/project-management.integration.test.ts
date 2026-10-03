@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { after, test } from "node:test";
 import { NextRequest } from "next/server.js";
+import { Client } from "pg";
 import { POST as register } from "../src/app/api/auth/register/route.ts";
 import { POST as login } from "../src/app/api/auth/login/route.ts";
 import { POST as consumeVerification } from "../src/app/api/auth/verification/consume/route.ts";
@@ -36,6 +40,15 @@ import {
   GET as listTaskComments,
   POST as createTaskComment,
 } from "../src/app/api/organizations/[organizationId]/projects/[projectId]/tasks/[taskId]/comments/route.ts";
+import {
+  GET as listTaskFiles,
+  POST as uploadTaskFile,
+} from "../src/app/api/organizations/[organizationId]/projects/[projectId]/tasks/[taskId]/files/route.ts";
+import {
+  DELETE as deleteTaskFile,
+  GET as getTaskFile,
+  PUT as replaceTaskFile,
+} from "../src/app/api/organizations/[organizationId]/projects/[projectId]/tasks/[taskId]/files/[fileId]/route.ts";
 import { GET as getProjectActivity } from "../src/app/api/organizations/[organizationId]/projects/[projectId]/activity/route.ts";
 import { GET as getProjectAnalytics } from "../src/app/api/organizations/[organizationId]/projects/[projectId]/analytics/route.ts";
 import { GET as listNotifications } from "../src/app/api/organizations/[organizationId]/notifications/route.ts";
@@ -56,10 +69,18 @@ process.env.APP_ORIGIN = origin;
 process.env.AUTH_RATE_LIMIT_HMAC_KEY = randomBytes(32).toString("hex");
 delete process.env.NEXORA_TRUSTED_CLIENT_IP_HEADER;
 let smtp: SmtpCapture | undefined;
+let privateFilesRoot: string | undefined;
+let previousPrivateFileDirectory: string | undefined;
+let previousFileSigningKey: string | undefined;
 
 after(async () => {
   await smtp?.close();
   await closeDatabasePool();
+  if (privateFilesRoot) await rm(privateFilesRoot, { recursive: true, force: true });
+  if (previousPrivateFileDirectory === undefined) delete process.env.NEXORA_PRIVATE_FILE_DIR;
+  else process.env.NEXORA_PRIVATE_FILE_DIR = previousPrivateFileDirectory;
+  if (previousFileSigningKey === undefined) delete process.env.NEXORA_FILE_SIGNING_KEY;
+  else process.env.NEXORA_FILE_SIGNING_KEY = previousFileSigningKey;
 });
 
 function apiRequest(
@@ -77,6 +98,38 @@ function apiRequest(
     method,
     headers,
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+  });
+}
+
+async function withTrustedClientIp<T>(work: (headerName: string) => Promise<T>): Promise<T> {
+  const headerName = "x-nexora-test-client-ip";
+  const previousHeader = process.env.NEXORA_TRUSTED_CLIENT_IP_HEADER;
+  process.env.NEXORA_TRUSTED_CLIENT_IP_HEADER = headerName;
+  try {
+    return await work(headerName);
+  } finally {
+    if (previousHeader === undefined) delete process.env.NEXORA_TRUSTED_CLIENT_IP_HEADER;
+    else process.env.NEXORA_TRUSTED_CLIENT_IP_HEADER = previousHeader;
+  }
+}
+
+function privateFileRequest(
+  pathname: string,
+  method: "POST" | "PUT",
+  bytes: Uint8Array,
+  filename: string,
+  cookie: string,
+  extraHeaders?: Record<string, string>,
+): NextRequest {
+  const headers = new Headers(extraHeaders);
+  headers.set("origin", origin);
+  headers.set("content-type", "text/plain");
+  headers.set("x-file-name", encodeURIComponent(filename));
+  headers.set("cookie", cookie);
+  return new NextRequest(`${origin}${pathname}`, {
+    method,
+    headers,
+    body: new Uint8Array(bytes),
   });
 }
 
@@ -120,7 +173,7 @@ async function createWorkspace(cookie: string, slug: string) {
 test(
   "projects enforce explicit membership, manager authority, state transitions, and optimistic versions",
   { skip: !connectionString },
-  async () => {
+  async (t) => {
     smtp = await startSmtpCaptureServer();
     process.env.SMTP_HOST = "127.0.0.1";
     process.env.SMTP_PORT = String(smtp.port);
@@ -129,6 +182,11 @@ test(
     process.env.SMTP_USER = "";
     process.env.SMTP_PASSWORD = "";
     process.env.SMTP_FROM = "noreply@nexora.example.test";
+    previousPrivateFileDirectory = process.env.NEXORA_PRIVATE_FILE_DIR;
+    previousFileSigningKey = process.env.NEXORA_FILE_SIGNING_KEY;
+    privateFilesRoot = await mkdtemp(path.join(os.tmpdir(), "nexora-task-files-"));
+    process.env.NEXORA_PRIVATE_FILE_DIR = privateFilesRoot;
+    process.env.NEXORA_FILE_SIGNING_KEY = randomBytes(32).toString("hex");
 
     const owner = await registerVerifyAndLogin(
       `${randomUUID()}@example.test`,
@@ -180,14 +238,17 @@ test(
       data: { project: { id: string; status: string; owner_user_id: string; version: number } };
     };
     const projectId = createdBody.data.project.id;
-    const ownerSearch = await searchOrganization(
-      apiRequest(
-        `/api/organizations/${organizationId}/search?q=Quarterly&type=project`,
-        "GET",
-        undefined,
-        owner.cookie,
+    const ownerSearch = await withTrustedClientIp((headerName) =>
+      searchOrganization(
+        apiRequest(
+          `/api/organizations/${organizationId}/search?q=Quarterly&type=project`,
+          "GET",
+          undefined,
+          owner.cookie,
+          { [headerName]: "203.0.113.10" },
+        ),
+        { params: Promise.resolve({ organizationId }) },
       ),
-      { params: Promise.resolve({ organizationId }) },
     );
     assert.equal(ownerSearch.status, 200, await ownerSearch.clone().text());
     const ownerSearchBody = (await ownerSearch.json()) as {
@@ -286,6 +347,98 @@ test(
     const memberTaskBody = (await memberTaskResponse.json()) as { data: { task: { id: string } } };
     memberTaskId = memberTaskBody.data.task.id;
     const memberTaskParams = { params: Promise.resolve({ organizationId, projectId, taskId: memberTaskId }) };
+    const taskFilesPath = `${taskCollectionPath}/${memberTaskId}/files`;
+    const fileBytesV1 = Buffer.from("Private release notes v1\n", "utf8");
+    const [uploadedFileResponse, concurrentFileReplay] = await withTrustedClientIp((headerName) =>
+      Promise.all(
+        [0, 1].map(() =>
+          uploadTaskFile(
+            privateFileRequest(
+              taskFilesPath,
+              "POST",
+              fileBytesV1,
+              "release-notes.txt",
+              member.cookie,
+              { "idempotency-key": "member-file-upload-001", [headerName]: "203.0.113.11" },
+            ),
+            memberTaskParams,
+          ),
+        ),
+      ),
+    );
+    assert.equal(uploadedFileResponse.status, 201, await uploadedFileResponse.clone().text());
+    assert.equal(concurrentFileReplay.status, 201, await concurrentFileReplay.clone().text());
+    const uploadedFileBody = (await uploadedFileResponse.json()) as {
+      data: { file: { id: string; original_filename: string; version: number } };
+    };
+    const taskFileId = uploadedFileBody.data.file.id;
+    const taskFilePath = `${taskFilesPath}/${taskFileId}`;
+    const concurrentFileReplayBody = (await concurrentFileReplay.json()) as {
+      data: { file: { id: string } };
+    };
+    assert.equal(concurrentFileReplayBody.data.file.id, taskFileId);
+    assert.equal(uploadedFileBody.data.file.original_filename, "release-notes.txt");
+    assert.equal(uploadedFileBody.data.file.version, 1);
+    assert.equal(Object.hasOwn(uploadedFileBody.data.file, "storage_key"), false);
+
+    const memberFileList = await listTaskFiles(
+      apiRequest(taskFilesPath, "GET", undefined, member.cookie),
+      memberTaskParams,
+    );
+    assert.equal(memberFileList.status, 200);
+    const memberFileListBody = (await memberFileList.json()) as {
+      data: { files: Array<{ id: string; version: number }> };
+    };
+    assert.deepEqual(memberFileListBody.data.files.map((file) => file.id), [taskFileId]);
+
+    const changedUploadReplay = await uploadTaskFile(
+      privateFileRequest(
+        taskFilesPath,
+        "POST",
+        Buffer.from("different bytes for the same upload key\n", "utf8"),
+        "release-notes.txt",
+        member.cookie,
+        { "idempotency-key": "member-file-upload-001" },
+      ),
+      memberTaskParams,
+    );
+    assert.equal(changedUploadReplay.status, 409);
+
+    const memberDownloadLink = await getTaskFile(
+      apiRequest(taskFilePath, "GET", undefined, member.cookie),
+      { params: Promise.resolve({ organizationId, projectId, taskId: memberTaskId, fileId: taskFileId }) },
+    );
+    assert.equal(memberDownloadLink.status, 200);
+    const memberDownloadLinkBody = (await memberDownloadLink.json()) as { data: { url: string } };
+    const firstSignedPath = new URL(memberDownloadLinkBody.data.url, origin).pathname +
+      new URL(memberDownloadLinkBody.data.url, origin).search;
+    const firstDownload = await getTaskFile(
+      apiRequest(firstSignedPath),
+      { params: Promise.resolve({ organizationId, projectId, taskId: memberTaskId, fileId: taskFileId }) },
+    );
+    assert.equal(firstDownload.status, 200);
+    assert.match(firstDownload.headers.get("content-disposition") ?? "", /^attachment;/);
+    assert.equal(firstDownload.headers.get("cache-control"), "private, no-store");
+    assert.deepEqual(Buffer.from(await firstDownload.arrayBuffer()), fileBytesV1);
+
+    const fileBytesV2 = Buffer.from("Private release notes v2\n", "utf8");
+    const replacedFileResponse = await replaceTaskFile(
+      privateFileRequest(taskFilePath, "PUT", fileBytesV2, "release-notes.txt", member.cookie, {
+        "if-match": '"1"',
+      }),
+      { params: Promise.resolve({ organizationId, projectId, taskId: memberTaskId, fileId: taskFileId }) },
+    );
+    assert.equal(replacedFileResponse.status, 200, await replacedFileResponse.clone().text());
+    const replacedFileBody = (await replacedFileResponse.json()) as {
+      data: { file: { id: string; version: number } };
+    };
+    assert.equal(replacedFileBody.data.file.version, 2);
+    const staleVersionDownload = await getTaskFile(
+      apiRequest(firstSignedPath),
+      { params: Promise.resolve({ organizationId, projectId, taskId: memberTaskId, fileId: taskFileId }) },
+    );
+    assert.equal(staleVersionDownload.status, 404);
+
     const memberComment = await createTaskComment(
       apiRequest(
         `${taskCollectionPath}/${memberTaskId}/comments`,
@@ -481,6 +634,70 @@ test(
       { params: Promise.resolve({ organizationId, projectId, userId: member.userId }) },
     );
     assert.equal(changedToViewer.status, 200);
+
+    const viewerFileList = await listTaskFiles(
+      apiRequest(taskFilesPath, "GET", undefined, member.cookie),
+      memberTaskParams,
+    );
+    assert.equal(viewerFileList.status, 200);
+    const viewerFileListBody = (await viewerFileList.json()) as {
+      data: { files: Array<{ id: string; version: number }> };
+    };
+    assert.deepEqual(viewerFileListBody.data.files.map((file) => [file.id, file.version]), [[taskFileId, 2]]);
+    const viewerDownloadLink = await getTaskFile(
+      apiRequest(taskFilePath, "GET", undefined, member.cookie),
+      { params: Promise.resolve({ organizationId, projectId, taskId: memberTaskId, fileId: taskFileId }) },
+    );
+    assert.equal(viewerDownloadLink.status, 200);
+    const viewerDownloadLinkBody = (await viewerDownloadLink.json()) as { data: { url: string } };
+    const viewerSignedUrl = new URL(viewerDownloadLinkBody.data.url, origin);
+    const viewerDownload = await getTaskFile(
+      apiRequest(viewerSignedUrl.pathname + viewerSignedUrl.search),
+      { params: Promise.resolve({ organizationId, projectId, taskId: memberTaskId, fileId: taskFileId }) },
+    );
+    assert.equal(viewerDownload.status, 200, await viewerDownload.clone().text());
+    assert.deepEqual(Buffer.from(await viewerDownload.arrayBuffer()), fileBytesV2);
+
+    const viewerFileUpload = await uploadTaskFile(
+      privateFileRequest(
+        taskFilesPath,
+        "POST",
+        Buffer.from("viewer upload should fail\n", "utf8"),
+        "viewer.txt",
+        member.cookie,
+        { "idempotency-key": "viewer-file-upload-001" },
+      ),
+      memberTaskParams,
+    );
+    assert.equal(viewerFileUpload.status, 403);
+    const viewerFileReplace = await replaceTaskFile(
+      privateFileRequest(taskFilePath, "PUT", Buffer.from("viewer replace should fail\n", "utf8"), "release-notes.txt", member.cookie, {
+        "if-match": '"2"',
+      }),
+      { params: Promise.resolve({ organizationId, projectId, taskId: memberTaskId, fileId: taskFileId }) },
+    );
+    assert.equal(viewerFileReplace.status, 403);
+    const viewerFileDelete = await deleteTaskFile(
+      apiRequest(taskFilePath, "DELETE", undefined, member.cookie),
+      { params: Promise.resolve({ organizationId, projectId, taskId: memberTaskId, fileId: taskFileId }) },
+    );
+    assert.equal(viewerFileDelete.status, 403);
+    const ownerFileDelete = await deleteTaskFile(
+      apiRequest(taskFilePath, "DELETE", undefined, owner.cookie),
+      { params: Promise.resolve({ organizationId, projectId, taskId: memberTaskId, fileId: taskFileId }) },
+    );
+    assert.equal(ownerFileDelete.status, 200);
+    const deletedFileList = await listTaskFiles(
+      apiRequest(taskFilesPath, "GET", undefined, owner.cookie),
+      memberTaskParams,
+    );
+    assert.equal(deletedFileList.status, 200);
+    assert.deepEqual(((await deletedFileList.json()) as { data: { files: unknown[] } }).data.files, []);
+    const revokedSignedDownload = await getTaskFile(
+      apiRequest(viewerSignedUrl.pathname + viewerSignedUrl.search),
+      { params: Promise.resolve({ organizationId, projectId, taskId: memberTaskId, fileId: taskFileId }) },
+    );
+    assert.equal(revokedSignedDownload.status, 404);
 
     const viewerUpdate = await updateProject(
       apiRequest(
@@ -1027,5 +1244,267 @@ test(
     assert.ok(auditActions.includes("project.member.added"));
     assert.ok(auditActions.includes("project.member.updated"));
     assert.ok(auditActions.includes("task.comment_created"));
+
+    const graphProjectResponse = await createProject(
+      apiRequest(
+        `/api/organizations/${organizationId}/projects`,
+        "POST",
+        { name: "Milestone graph concurrency test" },
+        owner.cookie,
+      ),
+      { params: Promise.resolve({ organizationId }) },
+    );
+    assert.equal(graphProjectResponse.status, 201, await graphProjectResponse.clone().text());
+    const graphProjectBody = (await graphProjectResponse.json()) as {
+      data: { project: { id: string } };
+    };
+    const graphProjectId = graphProjectBody.data.project.id;
+    const graphProjectParams = { params: Promise.resolve({ organizationId, projectId: graphProjectId }) };
+
+    async function createGraphMilestone(name: string, idempotencyKey: string): Promise<string> {
+      const response = await createMilestone(
+        apiRequest(
+          `/api/organizations/${organizationId}/projects/${graphProjectId}/milestones`,
+          "POST",
+          { name },
+          owner.cookie,
+          { "idempotency-key": idempotencyKey },
+        ),
+        graphProjectParams,
+      );
+      assert.equal(response.status, 201, await response.clone().text());
+      const body = (await response.json()) as { data: { milestone: { id: string } } };
+      return body.data.milestone.id;
+    }
+
+    const graphMilestoneA = await createGraphMilestone("Graph milestone A", randomUUID());
+    const graphMilestoneB = await createGraphMilestone("Graph milestone B", randomUUID());
+    const repeatedReadMilestoneA = await createGraphMilestone("Repeatable read milestone A", randomUUID());
+    const repeatedReadMilestoneB = await createGraphMilestone("Repeatable read milestone B", randomUUID());
+
+    const taskGraphIds = [randomUUID(), randomUUID()];
+    await withOrganizationContext(
+      owner.userId,
+      organizationId,
+      async (transaction) => {
+        const status = await transaction.query<{ id: string }>(
+          `SELECT id FROM nexora.project_task_statuses
+           WHERE organization_id = $1 AND project_id = $2
+           ORDER BY sort_order, id LIMIT 1`,
+          [organizationId, graphProjectId],
+        );
+        assert.ok(status.rows[0]);
+        for (const [index, taskId] of taskGraphIds.entries()) {
+          await transaction.query(
+            `INSERT INTO nexora.tasks
+               (id, organization_id, project_id, title, workflow_status_id, created_by_user_id)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [taskId, organizationId, graphProjectId, `Repeatable read task ${index + 1}`, status.rows[0].id, owner.userId],
+          );
+        }
+      },
+    );
+
+    async function raceGraphInsertAtRepeatableRead(
+      table: "milestone_dependencies" | "task_dependencies",
+      sourceColumn: "milestone_id" | "task_id",
+      targetColumn: "depends_on_milestone_id" | "depends_on_task_id",
+      itemA: string,
+      itemB: string,
+    ): Promise<void> {
+      const clients = [new Client({ connectionString }), new Client({ connectionString })];
+      const committed = new Set<number>();
+      let connected = 0;
+      try {
+        for (const client of clients) {
+          await client.connect();
+          connected += 1;
+        }
+        await Promise.all(clients.map((client) => client.query("BEGIN ISOLATION LEVEL REPEATABLE READ")));
+        await Promise.all(
+          clients.map((client) =>
+            client.query(
+              "SELECT pg_catalog.set_config('nexora.user_id', $1, true), pg_catalog.set_config('nexora.organization_id', $2, true)",
+              [owner.userId, organizationId],
+            ),
+          ),
+        );
+        await Promise.all(
+          clients.map((client) =>
+            client.query(
+              `SELECT count(*) FROM nexora.${table}
+               WHERE organization_id = $1 AND project_id = $2`,
+              [organizationId, graphProjectId],
+            ),
+          ),
+        );
+
+        const insertSql = `INSERT INTO nexora.${table}
+          (organization_id, project_id, ${sourceColumn}, ${targetColumn})
+          VALUES ($1, $2, $3, $4)`;
+        const attempts = [
+          [itemA, itemB],
+          [itemB, itemA],
+        ].map(([source, target], index) =>
+          clients[index]!.query(insertSql, [organizationId, graphProjectId, source, target]).then(
+            () => ({ index, inserted: true as const }),
+            (error: unknown) => ({ index, inserted: false as const, error }),
+          ),
+        );
+
+        const first = await Promise.race(attempts);
+        assert.equal(first.inserted, true);
+        await clients[first.index]!.query("COMMIT");
+        committed.add(first.index);
+
+        const outcomes = await Promise.all(attempts);
+        assert.equal(outcomes.filter((outcome) => outcome.inserted).length, 1);
+        const rejected = outcomes.find(
+          (outcome): outcome is Extract<(typeof outcomes)[number], { inserted: false }> => !outcome.inserted,
+        );
+        assert.ok(rejected);
+        assert.equal((rejected.error as { code?: string }).code, "40001");
+
+        const remainingEdges = await withOrganizationContext(
+          owner.userId,
+          organizationId,
+          (transaction) =>
+            transaction.query<{ source_id: string; target_id: string }>(
+              `SELECT ${sourceColumn} AS source_id, ${targetColumn} AS target_id
+               FROM nexora.${table}
+               WHERE organization_id = $1 AND project_id = $2
+                 AND ${sourceColumn} = ANY($3::uuid[])
+                 AND ${targetColumn} = ANY($3::uuid[])`,
+              [organizationId, graphProjectId, [itemA, itemB]],
+            ),
+        );
+        assert.equal(remainingEdges.rows.length, 1);
+      } finally {
+        await Promise.all(
+          clients.slice(0, connected).map((client, index) =>
+            committed.has(index) ? Promise.resolve() : client.query("ROLLBACK").catch(() => undefined),
+          ),
+        );
+        await Promise.all(clients.slice(0, connected).map((client) => client.end()));
+      }
+    }
+
+    await t.test("direct milestone dependency inserts cannot cross projects", async () => {
+      const client = new Client({ connectionString });
+      await client.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query(
+          "SELECT pg_catalog.set_config('nexora.user_id', $1, true), pg_catalog.set_config('nexora.organization_id', $2, true)",
+          [owner.userId, organizationId],
+        );
+        await assert.rejects(
+          client.query(
+            `INSERT INTO nexora.milestone_dependencies
+               (organization_id, project_id, milestone_id, depends_on_milestone_id)
+             VALUES ($1, $2, $3, $4)`,
+            [organizationId, graphProjectId, graphMilestoneA, milestoneId],
+          ),
+          (error: { code?: string }) => error.code === "23503",
+        );
+      } finally {
+        await client.query("ROLLBACK").catch(() => undefined);
+        await client.end();
+      }
+    });
+
+    await t.test("simultaneous opposite milestone dependencies cannot create a cycle", async () => {
+      const clients = [new Client({ connectionString }), new Client({ connectionString })];
+      const committed = new Set<number>();
+      let connected = 0;
+      try {
+        for (const client of clients) {
+          await client.connect();
+          connected += 1;
+        }
+        await Promise.all(clients.map((client) => client.query("BEGIN")));
+        await Promise.all(
+          clients.map((client) =>
+            client.query(
+              "SELECT pg_catalog.set_config('nexora.user_id', $1, true), pg_catalog.set_config('nexora.organization_id', $2, true)",
+              [owner.userId, organizationId],
+            ),
+          ),
+        );
+
+        const insertSql = `INSERT INTO nexora.milestone_dependencies
+          (organization_id, project_id, milestone_id, depends_on_milestone_id)
+          VALUES ($1, $2, $3, $4)`;
+        const attempts = [
+          [graphMilestoneA, graphMilestoneB],
+          [graphMilestoneB, graphMilestoneA],
+        ].map(([milestone, dependency], index) =>
+          clients[index]!.query(insertSql, [organizationId, graphProjectId, milestone, dependency]).then(
+            () => ({ index, inserted: true as const }),
+            (error: unknown) => ({ index, inserted: false as const, error }),
+          ),
+        );
+
+        const first = await Promise.race(attempts);
+        if (!first.inserted) throw first.error;
+        await clients[first.index]!.query("COMMIT");
+        committed.add(first.index);
+
+        const outcomes = await Promise.all(attempts);
+        assert.equal(outcomes.filter((outcome) => outcome.inserted).length, 1);
+        const rejected = outcomes.find(
+          (outcome): outcome is Extract<(typeof outcomes)[number], { inserted: false }> => !outcome.inserted,
+        );
+        assert.ok(rejected);
+        assert.equal((rejected.error as { code?: string }).code, "23514");
+        assert.match((rejected.error as Error).message, /milestone dependency cycle detected/);
+
+        const remainingEdges = await withOrganizationContext(
+          owner.userId,
+          organizationId,
+          (transaction) =>
+            transaction.query<{ milestone_id: string; depends_on_milestone_id: string }>(
+              `SELECT milestone_id, depends_on_milestone_id
+               FROM nexora.milestone_dependencies
+               WHERE organization_id = $1 AND project_id = $2`,
+              [organizationId, graphProjectId],
+            ),
+        );
+        assert.equal(remainingEdges.rows.length, 1);
+        assert.ok(
+          (remainingEdges.rows[0]?.milestone_id === graphMilestoneA &&
+            remainingEdges.rows[0]?.depends_on_milestone_id === graphMilestoneB) ||
+            (remainingEdges.rows[0]?.milestone_id === graphMilestoneB &&
+              remainingEdges.rows[0]?.depends_on_milestone_id === graphMilestoneA),
+        );
+      } finally {
+        await Promise.all(
+          clients.slice(0, connected).map((client, index) =>
+            committed.has(index) ? Promise.resolve() : client.query("ROLLBACK").catch(() => undefined),
+          ),
+        );
+        await Promise.all(clients.slice(0, connected).map((client) => client.end()));
+      }
+    });
+
+    await t.test("milestone graph writes serialize with repeatable-read snapshots", async () => {
+      await raceGraphInsertAtRepeatableRead(
+        "milestone_dependencies",
+        "milestone_id",
+        "depends_on_milestone_id",
+        repeatedReadMilestoneA,
+        repeatedReadMilestoneB,
+      );
+    });
+
+    await t.test("task graph writes serialize with repeatable-read snapshots", async () => {
+      await raceGraphInsertAtRepeatableRead(
+        "task_dependencies",
+        "task_id",
+        "depends_on_task_id",
+        taskGraphIds[0]!,
+        taskGraphIds[1]!,
+      );
+    });
   },
 );

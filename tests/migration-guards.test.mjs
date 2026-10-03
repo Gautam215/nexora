@@ -12,6 +12,8 @@ const commentFoundation = await readFile(new URL("../db/migrations/0010_task_com
 const collaborationFoundation = await readFile(new URL("../db/migrations/0011_collaboration_notifications.sql", import.meta.url), "utf8");
 const notificationRlsFix = await readFile(new URL("../db/migrations/0015_notification_insert_rls.sql", import.meta.url), "utf8");
 const notificationDedupeRlsFix = await readFile(new URL("../db/migrations/0016_notification_dedupe_rls.sql", import.meta.url), "utf8");
+const graphAndRateLimitHardening = await readFile(new URL("../db/migrations/0021_rate_and_graph_lock_hardening.sql", import.meta.url), "utf8");
+const privateFileDownloadLock = await readFile(new URL("../db/migrations/0022_lock_private_file_download_reads.sql", import.meta.url), "utf8");
 const privateFilesFoundation = await readFile(new URL("../db/migrations/0012_private_task_files.sql", import.meta.url), "utf8");
 const searchFoundation = await readFile(new URL("../db/migrations/0013_authorized_search.sql", import.meta.url), "utf8");
 const searchRateLimit = await readFile(new URL("../db/migrations/0014_workspace_search_rate_limit.sql", import.meta.url), "utf8");
@@ -137,6 +139,17 @@ test("milestones and mutation idempotency are project-scoped and versioned", () 
   assert.match(grants, /ON TABLE nexora\.milestones TO nexora_app;/);
   assert.match(grants, /ON TABLE nexora\.project_mutation_idempotency TO nexora_app;/);
   assert.doesNotMatch(grants, /(?:DELETE|TRUNCATE) ON nexora\.milestones/i);
+});
+
+test("rate-limit counters saturate and graph writes serialize across transaction snapshots", () => {
+  assert.match(graphAndRateLimitHardening, /LEAST\(current_bucket\.attempts \+ 1, 1000\)/);
+  assert.match(graphAndRateLimitHardening, /CREATE TABLE nexora\.project_dependency_graph_locks/);
+  assert.match(graphAndRateLimitHardening, /ON CONFLICT \(organization_id, project_id, graph_type\) DO UPDATE/);
+  assert.match(graphAndRateLimitHardening, /SECURITY DEFINER[\s\S]+?nexora\.can_manage_current_project/);
+  assert.match(graphAndRateLimitHardening, /CREATE TRIGGER milestone_dependencies_graph_lock/);
+  assert.match(graphAndRateLimitHardening, /CREATE TRIGGER task_dependencies_graph_lock/);
+  assert.match(graphAndRateLimitHardening, /CREATE TRIGGER tasks_graph_lock_before_write/);
+  assert.match(graphAndRateLimitHardening, /REVOKE ALL ON TABLE nexora\.project_dependency_graph_locks FROM nexora_app/);
 });
 
 test("tasks use project-scoped RLS, configurable status columns, and safe archival", () => {
@@ -269,6 +282,7 @@ test("private file APIs validate uploads, authorize access, and invalidate stale
   assert.match(taskFilesCollectionRoute, /MAX_TASK_FILE_COUNT/);
   assert.match(taskFilesCollectionRoute, /MAX_TASK_FILE_BYTES/);
   assert.match(taskFileItemRoute, /verifyPrivateFileToken/);
+  assert.match(taskFileItemRoute, /lock_active_task_file_for_download/);
   assert.match(taskFileItemRoute, /isTokenRateLimited/);
   assert.match(taskFileItemRoute, /claims\.version/);
   assert.match(taskFileItemRoute, /privateFileContentDisposition/);
@@ -284,6 +298,16 @@ test("private file APIs validate uploads, authorize access, and invalidate stale
   assert.match(privateFileStorage, /0o700/);
   assert.match(privateFileStorage, /0o600/);
   assert.match(privateFileStorage, /O_NOFOLLOW/);
+});
+
+test("private download row locks preserve viewer authorization without broadening table grants", () => {
+  assert.match(privateFileDownloadLock, /SECURITY DEFINER[\s\S]+?SET search_path = pg_catalog, nexora/);
+  assert.match(privateFileDownloadLock, /target_organization_id IS DISTINCT FROM nexora\.current_organization_id\(\)/);
+  assert.match(privateFileDownloadLock, /nexora\.can_access_current_project\(target_organization_id, target_project_id\)/);
+  assert.match(privateFileDownloadLock, /file\.deleted_at IS NULL[\s\S]+?FOR SHARE/);
+  assert.match(privateFileDownloadLock, /REVOKE ALL ON FUNCTION nexora\.lock_active_task_file_for_download/);
+  assert.match(privateFileDownloadLock, /GRANT EXECUTE ON FUNCTION nexora\.lock_active_task_file_for_download/);
+  assert.doesNotMatch(grants, /GRANT UPDATE ON TABLE nexora\.task_files TO nexora_app/i);
 });
 
 test("workspace search is tenant-scoped, permission-aware, bounded, and indexed", () => {

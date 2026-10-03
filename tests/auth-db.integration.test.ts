@@ -131,3 +131,53 @@ test(
     }
   },
 );
+
+test(
+  "database rate-limit quota accepts configured ceilings up to 120 and rejects larger values",
+  { skip: !connectionString },
+  async () => {
+    const client = new Client({ connectionString });
+    await client.connect();
+    const subjectHash = randomBytes(32).toString("hex");
+
+    try {
+      const configuredCeiling = await client.query<{ consume_auth_rate_limit: boolean }>(
+        "SELECT nexora.consume_auth_rate_limit($1, $2, $3, $4)",
+        ["workspace-search", subjectHash, 120, 3600],
+      );
+      assert.equal(configuredCeiling.rows[0]?.consume_auth_rate_limit, true);
+      await assert.rejects(
+        client.query(
+          "SELECT nexora.consume_auth_rate_limit($1, $2, $3, $4)",
+          ["workspace-search", randomBytes(32).toString("hex"), 121, 3600],
+        ),
+        (error: { code?: string }) => error.code === "22023",
+      );
+    } finally {
+      await client.end();
+    }
+  },
+);
+
+test(
+  "denied rate-limit attempts stay denied without overflowing their counter",
+  { skip: !connectionString },
+  async () => {
+    const client = new Client({ connectionString });
+    await client.connect();
+    const subjectHash = randomBytes(32).toString("hex");
+
+    try {
+      const decisions = await client.query<{ allowed: boolean }>(
+        `SELECT nexora.consume_auth_rate_limit($1, $2, $3, $4) AS allowed
+         FROM pg_catalog.generate_series(1, 1005)`,
+        ["login-email", subjectHash, 1, 3600],
+      );
+      assert.equal(decisions.rowCount, 1005);
+      assert.equal(decisions.rows.filter((row) => row.allowed).length, 1);
+      assert.ok(decisions.rows.every((row) => typeof row.allowed === "boolean"));
+    } finally {
+      await client.end();
+    }
+  },
+);
