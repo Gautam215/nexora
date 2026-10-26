@@ -26,7 +26,7 @@ export async function readTaskFileScope(
             nexora.can_access_current_project(project.organization_id, project.id) AS can_access,
             nexora.can_work_current_project(project.organization_id, project.id) AS can_work
      FROM nexora.projects AS project
-     WHERE project.organization_id = $1 AND project.id = $2`,
+     WHERE project.organization_id = $1 AND project.id = $2 AND project.deleted_at IS NULL`,
     [organizationId, projectId],
   );
   const projectRow = project.rows[0];

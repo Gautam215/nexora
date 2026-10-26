@@ -136,6 +136,7 @@ export async function readProjectTask(
        ON milestone.organization_id = task.organization_id
       AND milestone.project_id = task.project_id
       AND milestone.id = task.milestone_id
+      AND milestone.deleted_at IS NULL
      LEFT JOIN nexora.tasks AS parent
        ON parent.organization_id = task.organization_id
       AND parent.project_id = task.project_id

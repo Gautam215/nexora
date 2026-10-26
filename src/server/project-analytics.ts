@@ -57,6 +57,7 @@ export async function readProjectAnalytics(
               FROM nexora.milestones AS milestone
               WHERE milestone.organization_id = project.organization_id
                 AND milestone.project_id = project.id
+                AND milestone.deleted_at IS NULL
             ) AS total_milestone_count,
             (
               SELECT count(*)::integer
@@ -64,6 +65,7 @@ export async function readProjectAnalytics(
               WHERE milestone.organization_id = project.organization_id
                 AND milestone.project_id = project.id
                 AND milestone.status = 'completed'
+                AND milestone.deleted_at IS NULL
             ) AS completed_milestone_count,
             (
               SELECT count(*)::integer
@@ -72,6 +74,7 @@ export async function readProjectAnalytics(
                 AND milestone.project_id = project.id
                 AND milestone.status <> 'completed'
                 AND milestone.end_date < CURRENT_DATE
+                AND milestone.deleted_at IS NULL
             ) AS overdue_milestone_count
      FROM nexora.projects AS project
      LEFT JOIN nexora.tasks AS task
@@ -84,6 +87,7 @@ export async function readProjectAnalytics(
       AND workflow.id = task.workflow_status_id
      WHERE project.organization_id = $1
        AND project.id = $2
+       AND project.deleted_at IS NULL
        AND nexora.can_access_current_project(project.organization_id, project.id)
      GROUP BY project.organization_id, project.id, project.status, project.target_date`,
     [organizationId, projectId],
@@ -116,7 +120,7 @@ export async function readProjectAnalytics(
          AND task.milestone_id = milestone.id
          AND task.archived_at IS NULL
      ) AS metrics ON true
-     WHERE milestone.organization_id = $1 AND milestone.project_id = $2
+     WHERE milestone.organization_id = $1 AND milestone.project_id = $2 AND milestone.deleted_at IS NULL
      ORDER BY CASE WHEN milestone.status = 'completed' THEN 1 ELSE 0 END,
               milestone.end_date NULLS LAST,
               milestone.start_date NULLS LAST,
@@ -200,6 +204,7 @@ export async function readProjectAnalytics(
          AND milestone.project_id = $2
          AND milestone.status <> 'completed'
          AND milestone.end_date >= CURRENT_DATE
+         AND milestone.deleted_at IS NULL
        UNION ALL
        SELECT project.id::text AS id,
               'project'::text AS kind,
@@ -208,6 +213,7 @@ export async function readProjectAnalytics(
        FROM nexora.projects AS project
        WHERE project.organization_id = $1
          AND project.id = $2
+         AND project.deleted_at IS NULL
          AND project.status NOT IN ('completed', 'archived')
          AND project.target_date >= CURRENT_DATE
      ) AS due
@@ -243,6 +249,7 @@ export async function readProjectAnalytics(
              WHERE milestone.organization_id = $1
                AND milestone.project_id = $2
                AND milestone.id = event.target_id
+               AND milestone.deleted_at IS NULL
            ))
            OR (event.target_type = 'project_membership'
              AND pg_catalog.lower(event.details->>'projectId') = pg_catalog.lower($2::text))
@@ -265,6 +272,7 @@ export async function readProjectAnalytics(
       AND milestone.organization_id = $1
       AND milestone.project_id = $2
       AND milestone.id = event.target_id
+      AND milestone.deleted_at IS NULL
      LEFT JOIN LATERAL (
        SELECT member.display_name
        FROM nexora.list_current_project_members($1, $2) AS member

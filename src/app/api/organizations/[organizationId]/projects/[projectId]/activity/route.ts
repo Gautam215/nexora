@@ -48,7 +48,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
         const access = await transaction.query<{ can_access: boolean }>(
           `SELECT nexora.can_access_current_project(project.organization_id, project.id) AS can_access
            FROM nexora.projects AS project
-           WHERE project.organization_id = $1 AND project.id = $2`,
+           WHERE project.organization_id = $1 AND project.id = $2 AND project.deleted_at IS NULL`,
           [organizationId, projectId],
         );
         if (!access.rows[0]?.can_access) return null;
@@ -79,6 +79,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
             AND milestone.organization_id = event.organization_id
             AND milestone.project_id = $2
             AND milestone.id = event.target_id
+            AND milestone.deleted_at IS NULL
            LEFT JOIN LATERAL (
              SELECT member.display_name
              FROM nexora.list_current_project_members($1, $2) AS member

@@ -7,6 +7,11 @@ import {
   type ProjectStatus,
 } from "../../security/project-status.ts";
 import type { ProjectAnalytics } from "../../security/project-analytics.ts";
+import AiAssistantPanel from "./ai-assistant-panel";
+import RealtimePanel from "./realtime-panel";
+import AiExtractionPanel from "./ai-extraction-panel";
+import AiRiskPanel from "./ai-risk-panel";
+import AiSummaryPanel from "./ai-summary-panel";
 import ProjectWorkNav from "./project-work-nav";
 
 interface Project {
@@ -74,6 +79,7 @@ export default function ProjectPage({
   const [pending, setPending] = useState("");
   const [selectedMember, setSelectedMember] = useState("");
   const [newMemberRole, setNewMemberRole] = useState("member");
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [error, setError] = useState("");
   const [analyticsError, setAnalyticsError] = useState("");
   const [memberError, setMemberError] = useState("");
@@ -225,6 +231,41 @@ export default function ProjectPage({
     }
   }
 
+  async function deleteProject() {
+    if (!project) return;
+    setPending("delete");
+    setError("");
+    try {
+      const response = await fetch(
+        `/api/organizations/${encodeURIComponent(organizationId)}/projects/${encodeURIComponent(projectId)}`,
+        {
+          method: "DELETE",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ expectedVersion: project.version }),
+        },
+      );
+      const result = (await response.json().catch(() => null)) as ApiResult<{
+        deleted?: boolean;
+      }> | null;
+      if (response.status === 401) {
+        window.location.assign("/login");
+        return;
+      }
+      if (!response.ok || !result?.data) {
+        setError(result?.error?.message ?? "Project could not be deleted.");
+        if (response.status === 409) setReloadKey((value) => value + 1);
+        setConfirmDelete(false);
+        return;
+      }
+      window.location.assign(`/organizations/${encodeURIComponent(organizationId)}`);
+    } catch {
+      setError("The service could not be reached. Try again in a moment.");
+      setConfirmDelete(false);
+    } finally {
+      setPending("");
+    }
+  }
+
   async function addMember(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!selectedMember) return;
@@ -356,6 +397,12 @@ export default function ProjectPage({
                 error={analyticsError}
               />
 
+              <AiSummaryPanel organizationId={organizationId} projectId={projectId} />
+              <AiExtractionPanel organizationId={organizationId} projectId={projectId} />
+              <AiRiskPanel organizationId={organizationId} projectId={projectId} />
+              <AiAssistantPanel organizationId={organizationId} projectId={projectId} />
+              <RealtimePanel organizationId={organizationId} projectId={projectId} />
+
               <section className="project-detail-section" aria-labelledby="project-details-title">
                 <div className="project-section-heading">
                   <div>
@@ -431,6 +478,53 @@ export default function ProjectPage({
                   </div>
                 )}
               </section>
+
+              {canManage && (
+                <section className="project-detail-section" aria-labelledby="project-delete-title">
+                  <div className="project-section-heading">
+                    <div>
+                      <p className="eyebrow">Danger zone</p>
+                      <h3 id="project-delete-title">Delete project</h3>
+                    </div>
+                  </div>
+                  <p className="project-section-copy">
+                    Deleting hides this project immediately for everyone. Its tasks, milestones,
+                    comments, files, and notifications are permanently removed after 30 days.
+                    Project activity records are kept.
+                  </p>
+                  {confirmDelete ? (
+                    <div className="confirm-panel" role="alertdialog" aria-label="Confirm project deletion">
+                      <p>
+                        Delete “{project.name}”? This hides the project immediately and permanently
+                        removes its tasks, milestones, comments, files, and notifications after
+                        30 days. Activity records are kept.
+                      </p>
+                      <div className="confirm-actions">
+                        <button
+                          className="danger-button"
+                          type="button"
+                          onClick={() => void deleteProject()}
+                          disabled={Boolean(pending)}
+                        >
+                          {pending === "delete" ? "Deleting..." : "Delete this project"}
+                        </button>
+                        <button type="button" onClick={() => setConfirmDelete(false)} disabled={Boolean(pending)}>
+                          Keep project
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      className="danger-button"
+                      type="button"
+                      onClick={() => setConfirmDelete(true)}
+                      disabled={Boolean(pending)}
+                    >
+                      Delete project
+                    </button>
+                  )}
+                </section>
+              )}
 
               <section className="project-detail-section" aria-labelledby="project-people-title">
                 <div className="project-section-heading">

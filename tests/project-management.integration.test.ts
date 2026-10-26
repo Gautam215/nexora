@@ -1641,3 +1641,117 @@ test(
     });
   },
 );
+
+test(
+  "project PATCH supports opt-in idempotency keys without breaking keyless updates",
+  { skip: !connectionString },
+  async () => {
+    // Reuse the file's SMTP server when it already exists: the mail
+    // transporter is cached module-level, so starting a second
+    // server would send this test's verification email to the first
+    // server's port while the test reads the second server's (empty)
+    // messages — and the orphaned first server would keep the
+    // process alive past the after hook.
+    if (!smtp) smtp = await startSmtpCaptureServer();
+    process.env.SMTP_HOST = "127.0.0.1";
+    process.env.SMTP_PORT = String(smtp.port);
+    process.env.SMTP_SECURE = "false";
+    process.env.SMTP_REQUIRE_TLS = "false";
+    process.env.SMTP_USER = "";
+    process.env.SMTP_PASSWORD = "";
+    process.env.SMTP_FROM = "noreply@nexora.example.test";
+
+    const owner = await registerVerifyAndLogin(
+      `${randomUUID()}@example.test`,
+      "Idempotency Owner",
+      "idempotency owner password",
+    );
+    const organizationId = await createWorkspace(owner.cookie, `idem-${owner.userId.slice(0, 8)}`);
+    const created = await createProject(
+      apiRequest(
+        `/api/organizations/${organizationId}/projects`,
+        "POST",
+        { name: "Idempotent project", description: "Before rename." },
+        owner.cookie,
+      ),
+      { params: Promise.resolve({ organizationId }) },
+    );
+    assert.equal(created.status, 201);
+    const createdBody = (await created.json()) as {
+      data: { project: { id: string; version: number } };
+    };
+    const projectId = createdBody.data.project.id;
+    assert.equal(createdBody.data.project.version, 1);
+    const projectPath = `/api/organizations/${organizationId}/projects/${projectId}`;
+    const params = { params: Promise.resolve({ organizationId, projectId }) };
+
+    const renamed = await updateProject(
+      apiRequest(projectPath, "PATCH", { expectedVersion: 1, name: "Renamed once" }, owner.cookie, {
+        "idempotency-key": "proj-update-key-1",
+      }),
+      params,
+    );
+    assert.equal(renamed.status, 200);
+    const renamedBody = (await renamed.json()) as {
+      data: { project: { name: string; version: number } };
+    };
+    assert.equal(renamedBody.data.project.name, "Renamed once");
+    assert.equal(renamedBody.data.project.version, 2);
+
+    // A retry with the same key and body replays the stored result
+    // instead of failing on the now-stale expected version.
+    const replayed = await updateProject(
+      apiRequest(projectPath, "PATCH", { expectedVersion: 1, name: "Renamed once" }, owner.cookie, {
+        "idempotency-key": "proj-update-key-1",
+      }),
+      params,
+    );
+    assert.equal(replayed.status, 200);
+    const replayedBody = (await replayed.json()) as {
+      data: { project: { name: string; version: number } };
+    };
+    assert.equal(replayedBody.data.project.name, "Renamed once");
+    assert.equal(replayedBody.data.project.version, 2);
+
+    // The same key with a different body is a key-reuse conflict,
+    // not a second application.
+    const conflict = await updateProject(
+      apiRequest(projectPath, "PATCH", { expectedVersion: 2, name: "Different name" }, owner.cookie, {
+        "idempotency-key": "proj-update-key-1",
+      }),
+      params,
+    );
+    assert.equal(conflict.status, 409);
+    const conflictBody = (await conflict.json()) as { error: { code: string } };
+    assert.equal(conflictBody.error.code, "IDEMPOTENCY_KEY_REUSED");
+
+    // A present but malformed key fails closed.
+    const malformed = await updateProject(
+      apiRequest(projectPath, "PATCH", { expectedVersion: 2, name: "Bad key" }, owner.cookie, {
+        "idempotency-key": "short",
+      }),
+      params,
+    );
+    assert.equal(malformed.status, 400);
+
+    // Keyless updates keep working exactly as before.
+    const keyless = await updateProject(
+      apiRequest(projectPath, "PATCH", { expectedVersion: 2, name: "No key rename" }, owner.cookie),
+      params,
+    );
+    assert.equal(keyless.status, 200);
+    const keylessBody = (await keyless.json()) as {
+      data: { project: { name: string; version: number } };
+    };
+    assert.equal(keylessBody.data.project.name, "No key rename");
+    assert.equal(keylessBody.data.project.version, 3);
+
+    const fetched = await getProject(apiRequest(projectPath, "GET", undefined, owner.cookie), params);
+    assert.equal(fetched.status, 200);
+    const fetchedBody = (await fetched.json()) as {
+      data: { project: { name: string; version: number } };
+    };
+    assert.equal(fetchedBody.data.project.name, "No key rename");
+    assert.equal(fetchedBody.data.project.version, 3);
+  },
+);

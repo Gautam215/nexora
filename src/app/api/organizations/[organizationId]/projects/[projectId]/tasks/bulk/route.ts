@@ -51,7 +51,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
           `SELECT project.status::text AS status,
                   nexora.can_work_current_project(project.organization_id, project.id) AS can_work
            FROM nexora.projects AS project
-           WHERE project.organization_id = $1 AND project.id = $2`,
+           WHERE project.organization_id = $1 AND project.id = $2 AND project.deleted_at IS NULL`,
           [organizationId, projectId],
         );
         if (!access.rows[0]) return { kind: "not_found" as const };
@@ -69,6 +69,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
              ON milestone.organization_id = task.organization_id
             AND milestone.project_id = task.project_id
             AND milestone.id = task.milestone_id
+            AND milestone.deleted_at IS NULL
            WHERE task.organization_id = $1 AND task.project_id = $2
              AND task.id = ANY($3::uuid[])
            ORDER BY task.id

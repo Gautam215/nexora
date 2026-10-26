@@ -56,7 +56,7 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
                   project.task_workflow_version,
                   nexora.can_manage_current_project(project.organization_id, project.id) AS can_manage
            FROM nexora.projects AS project
-           WHERE project.organization_id = $1 AND project.id = $2
+           WHERE project.organization_id = $1 AND project.id = $2 AND project.deleted_at IS NULL
            FOR UPDATE OF project`,
           [organizationId, projectId],
         );

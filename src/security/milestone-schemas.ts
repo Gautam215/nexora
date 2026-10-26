@@ -22,6 +22,10 @@ export const milestoneCreateSchema = z.strictObject({
   message: "End date must be on or after the start date.",
 });
 
+export const milestoneDeleteSchema = z.strictObject({
+  expectedVersion: z.number().int().min(1).max(2_147_483_646),
+});
+
 export const milestoneUpdateSchema = z.strictObject({
   expectedVersion: z.number().int().min(1).max(2_147_483_646),
   name: name.optional(),

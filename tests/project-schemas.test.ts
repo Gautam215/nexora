@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   projectCreateSchema,
+  projectDeleteSchema,
   projectMemberCreateSchema,
   projectUpdateSchema,
 } from "../src/security/project-schemas.ts";
@@ -32,6 +33,18 @@ test("project updates require an expected version and at least one change", () =
   assert.equal(projectUpdateSchema.safeParse({ expectedVersion: 1 }).success, false);
   assert.equal(projectUpdateSchema.safeParse({ expectedVersion: 1, status: "unknown" }).success, false);
   assert.equal(projectUpdateSchema.safeParse({ expectedVersion: 1, name: "New name" }).success, true);
+});
+
+test("project deletes require a bounded expected version and nothing else", () => {
+  assert.equal(projectDeleteSchema.safeParse({ expectedVersion: 1 }).success, true);
+  assert.equal(projectDeleteSchema.safeParse({ expectedVersion: 2_147_483_646 }).success, true);
+  assert.equal(projectDeleteSchema.safeParse({}).success, false);
+  assert.equal(projectDeleteSchema.safeParse({ expectedVersion: 0 }).success, false);
+  assert.equal(projectDeleteSchema.safeParse({ expectedVersion: -1 }).success, false);
+  assert.equal(projectDeleteSchema.safeParse({ expectedVersion: 1.5 }).success, false);
+  assert.equal(projectDeleteSchema.safeParse({ expectedVersion: 2_147_483_647 }).success, false);
+  assert.equal(projectDeleteSchema.safeParse({ expectedVersion: "1" }).success, false);
+  assert.equal(projectDeleteSchema.safeParse({ expectedVersion: 1, reason: "cleanup" }).success, false);
 });
 
 test("project access roles exclude organization-owner escalation", () => {

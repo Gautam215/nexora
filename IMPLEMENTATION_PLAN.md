@@ -1,0 +1,702 @@
+# Nexora — Implementation Plan
+
+This plan is ordered, small-stepped, and grounded in the actual project
+state. It does not restart the project, repeat completed work, or
+introduce features or technologies that are not in the PRD and the
+project documents (`DESIGN.md`, `ARCHITECTURE.md`, `DATABASE.md`,
+`API.md`, project `AGENTS.md`).
+
+**A note on the PRD source:** the repository does not contain a
+`PRD.md` file. The product source of truth is the Nexora PRD PDF supplied
+by the user (44 sections, 0–44) and the traceability record in
+`docs/prd-traceability.md`. If a `PRD.md` is later added to the
+repository, it must be derived from that PDF and this note must be
+updated; until then, no document in this plan should claim to quote a
+`PRD.md` that does not exist.
+
+**Current state, verified in this change:** lint passes (126 files),
+typecheck passes, the production build passes, and the unit/schema test
+suite passes with 72 passes and 9 database-integration skips (no
+disposable database is configured in this environment, so those 9 skip
+by design; they are not passes). The working tree already contained four
+local, unpushed changes: the search-test and accessibility fixes, and
+the PostgreSQL migrator/database guards with automatic runtime grants.
+Those changes are preserved and are the baseline for this plan, not
+work to be redone.
+
+**What is already working and preserved:** registration, login/logout,
+email verification and reset, opaque sessions, rate limits, organization
+creation and switching, invitations (create, accept, revoke), member
+role and status management, projects, milestones, tasks and subtasks,
+dependencies, configurable workflows, Kanban and list views, bulk
+priority, comments and mentions, project activity, in-app notifications,
+private task files with signed downloads, permission-aware workspace
+search, and calculated project analytics. Migrations `0001`–`0022` and
+runtime grants have passed on a disposable PostgreSQL 16 database in a
+prior run (85 tests, 0 skips, at that time).
+
+**What is not yet built:** AI (PRD 17–22, 24), realtime WebSockets and
+presence (PRD 25), logged-in password change, OAuth, active-session
+management, organization settings and deletion, project and milestone
+deletion, email notification delivery, durable shared file storage,
+malware scanning, scheduled file cleanup, health and observability
+beyond request-failure logs, and production deployment verification.
+(Health, readiness, and metrics are implemented as of 2026-10-26;
+cleanup scheduling is defined but blocked on production; storage and
+scanning still need an external-service decision. Two items from the
+2026-10-26 PRD audit were checked 2026-10-26 and are NOT implemented
+because the PRD gives no implementable policy — see "Open decisions"
+below: session rotation, and email delivery for notifications, which
+PRD §13 explicitly defers with "design the architecture so email
+notifications can be added safely later.")
+The Neon migration run authorized in the previous task remains blocked
+by a runtime permission (direct database connections are denied until
+the user switches them to "Ask" in Muse settings); it is not part of
+this plan's phases and must not be retried by working around that block.
+
+## Phase 0 — Documentation foundation (done in this change)
+
+- **Goal:** give the project the single-source-of-truth documents the
+  later phases will be built and reviewed against.
+- **Tasks:** write `DESIGN.md`, `ARCHITECTURE.md`, `DATABASE.md`,
+  `API.md`, project `AGENTS.md`, and this plan, each grounded in the
+  shipped code and the PRD, with future work explicitly marked as future.
+- **Files affected:** the six new root documents listed above.
+- **Dependencies:** none, beyond reading the PRD PDF, the shipped CSS,
+  the route handlers, the migrations, and `docs/prd-traceability.md`.
+- **Tests required:** none (documentation only); the baseline checks
+  above must still pass unchanged.
+- **Completion criteria:** each document names what exists, what does
+  not exist, and what is future work, without inventing an endpoint, a
+  table, or a feature that is not in the code.
+
+## Phase 1 — Fix known errors and close the smallest MVP gaps
+
+- **Goal:** make the existing implementation stable and honest before
+  any new feature is built. No new feature in a later phase starts while
+  a Phase 1 item that it depends on is open.
+- **Tasks:**
+  1. Fix the email-delivery failure gap — **done in this change
+     (2026-10-25, local, unpushed, verified on a disposable PostgreSQL
+     16 database, then dropped):** registration, password-reset, and
+     verification-resend no longer swallow SMTP failures. Each route
+     now verifies SMTP delivery before any account or token work, and
+     a delivery failure returns 503 `EMAIL_DELIVERY_UNAVAILABLE` with
+     a generic message, logged server-side as `EmailDeliveryError`
+     with no SMTP detail. Missing configuration still returns 503
+     `SERVICE_UNAVAILABLE`. During an SMTP outage, eligible and
+     ineligible addresses receive the same 503, because verification
+     runs before any eligibility check, so anti-enumeration is
+     preserved in that state; a transient failure after a successful
+     verify is the only case where a 503 can distinguish an eligible
+     address, and that case is documented here. The invitation route
+     was not changed: it already returns an honest `emailAccepted`
+     flag instead of claiming success, which is the correct pattern
+     for a non-enumerating route that is not required to hide
+     eligibility in the same way.
+  2. Verify the four already-local changes (search-test guard,
+     pagination `<nav>`, migrator `-pooler`/`sslmode` guards, automatic
+     runtime grants, Neon timeout, pool error listener) against a
+     disposable PostgreSQL database, and record the result. Do not push
+     them without explicit authorization.
+  3. Add the liveness endpoint: GET `/api/health`, unauthenticated,
+     returning process status and database state (`up`,
+     `unavailable`, `unconfigured`) with no secrets or versions.
+     (Implemented in this change; see below.)
+  4. Confirm that no test, lint, or typecheck failure remains in the
+     baseline, and that the 9 skipped integration tests are reported
+     as skips, not passes.
+- **Files or modules likely affected:** `src/server/email.ts`,
+  `src/app/api/auth/*`, `src/server/db.ts`,
+  `src/app/api/health/route.ts` (new), `tests/health.test.ts` (new).
+- **Dependencies:** Phase 0 documents; a disposable database for item 2.
+- **Database/API changes:** none for items 1, 3, and 4, except that
+  item 2 verifies migrations `0001`–`0022` and grants on a disposable
+  database. No production migration is authorized by this plan.
+- **Tests required:** unit tests for the health endpoint (no database
+  required); integration tests for the email-failure path against a
+  disposable database and a local test SMTP server; the full
+  `npm run check` and `npm run build`.
+- **Completion criteria:** `npm run check` and `npm run build` pass;
+  the health endpoint returns 200 with a truthful database field in
+  all three database states; an SMTP failure no longer produces a
+  false success message; the four local changes are either verified
+  on a disposable database or explicitly recorded as unverified.
+
+## Phase 2 — Complete the authentication MVP
+
+- **Goal:** close PRD section 5's remaining account capabilities, in
+  dependency order, before any feature that depends on account security.
+- **Tasks, in order:**
+  1. Logged-in password change — **done (2026-10-25, local, unpushed,
+     API only, verified on a disposable PostgreSQL 16 database, then
+     dropped):** `POST /api/auth/password-change`, authenticated,
+     current password verified with the existing scrypt
+     implementation, new password under the existing 12–128 policy,
+     rate-limited (5/hour per email, 30/hour per IP) via a new
+     `password-change` rate-limit scope in migration 0023, and
+     password update + revocation of all other sessions in one
+     transaction, keeping the current session (see the policy note in
+     `src/server/auth.ts`). No password is logged or returned, and
+     no new hashing implementation was created.
+  2. Active-session management — **done (2026-10-25, local, unpushed,
+     API only, verified on the same disposable database):**
+     `GET /api/auth/sessions` (metadata only, never a token or token
+     hash, expired/revoked excluded, `current` flag),
+     `POST /api/auth/sessions/revoke` (one own session; not-found,
+     already-revoked, expired, and another user's session all return
+     the same 404; revoking the current session clears its cookie),
+     `POST /api/auth/sessions/revoke-others` (all except the current
+     session, returning the count). No migration was needed for
+     sessions: `user_sessions` and its RLS policies already support
+     all three operations.
+  2b. Account-settings UI — **done (2026-10-25, local, unpushed,
+     `/account`):** `account-settings-page.tsx` reuses the shared
+     auth shell and `DESIGN.md` tokens, with a password-change form
+     (current, new, confirm; client validation mirrors the server
+     12–128 policy; fields cleared on success; duplicate submits
+     blocked by a disabled submit button) and an active-sessions list
+     (created, last seen, expiry, `current` flag; no invented device
+     details; inline confirmation before any revoke; revoking the
+     current session redirects to sign-in; the list refreshes after
+     every successful revoke and after a password change). Loading,
+     empty, error, retry, and unauthorized (redirect to sign-in)
+     states are all handled. A link to `/account` was added to the
+     workspaces topline. No new dependency was added, and no
+     decorative animation was added. Real-browser verification
+     (2026-10-25, after the LNA blocker was resolved, see below):
+     17/17 Playwright checks passed against the local production
+     build with a disposable database. Two defects found by those
+     checks were fixed in the same change: a wrong current password
+     no longer redirects to sign-in (only a genuinely missing
+     session does), and a successful revocation refreshes the list
+     before showing its success message, so the refresh cannot erase
+     it. A third fix in the same change lets a production build run
+     over HTTP on loopback origins only (`hasSameOrigin`); remote
+     HTTP origins are still rejected in production.
+  3. OAuth architecture only: documented 2026-10-25 in
+     `ARCHITECTURE.md` section 7.1 and `API.md` section 2.2a (Google
+     first, Authorization Code + PKCE, cookie-based single-use
+     state/verifier, provider-subject linking, proposed
+     `oauth_identities` table and nullable `password_hash`, all marked
+     as proposed). No endpoints, tables, or migrations were created.
+     Design decisions resolved 2026-10-26 (documentation only):
+     disabled-account gate, strict RS256 `id_token` validation with
+     JWKS refetch-once and fail-closed errors, HMAC-signed
+     `__Host-` flow cookie, sign-in / link separation (link creates
+     no session and verifies the same user), atomic creation with
+     duplicate-email race handling, provider-email normalization
+     with existing schemas, access-token discard, fixed 302
+     callback redirect with allowlisted error codes and
+     `Referrer-Policy: no-referrer`, separate 60-per-900-seconds
+     IP limits for start and callback, the RLS / security-definer
+     split in one append-only migration, one Google identity per
+     user, flag coverage for both endpoints with fail-closed
+     missing credentials, the loopback HTTP exception, and one
+     Google button on the sign-in page. Behaviour change from the
+     2026-10-25 draft: the sign-in flow no longer links by email
+     match; a pre-existing password user links from Account
+     security first. Do not implement a provider until the design
+     is approved, because OAuth changes the session and account
+     model.
+     **Implemented 2026-10-26 (local, unpushed, design as approved
+     above):** migration 0032 (`oauth_identities` with both UNIQUE
+     constraints, RLS + `lookup_oauth_identity` security-definer
+     function, nullable `users.password_hash`, `oauth-start` /
+     `oauth-callback` rate-limit scopes), `POST
+     /api/auth/oauth/google/start`, `POST
+     /api/auth/oauth/google/link/start`, `GET
+     /api/auth/oauth/google/callback` (flag-gated 404s, fail-closed
+     credentials, HMAC-signed flow cookie, strict RS256 `id_token`
+     validation with JWKS refetch-once, atomic user + identity
+     creation with duplicate-race re-lookup, link flow creating no
+     session), one Google button on the sign-in page and a link
+     section on `/account`, fixed error-code messages on both
+     pages, and `.env.example` entries. Verified on a disposable
+     PostgreSQL 16 database: unit tests
+     (`tests/oauth-google.test.ts`, 11 tests) and integration
+     tests (`tests/oauth-google.integration.test.ts`, 22 tests)
+     against a local mock IdP (token + JWKS endpoints). Live
+     Google verification is still blocked: no Google client
+     credentials exist, so no real Google sign-in has been
+     exercised.
+- **Files or modules likely affected:** `src/server/auth.ts`,
+  `src/security/password.ts`, `src/security/auth-schemas.ts`,
+  `src/app/api/auth/*`, `src/app/components/auth-page.tsx`, a new
+  account-settings screen.
+- **Dependencies:** Phase 1 (email truthfulness, because password
+  change and session revocation both interact with verification and
+  notification).
+- **Database/API changes:** a password-change endpoint and session
+  list/revoke endpoints; a migration only if session metadata must be
+  stored that is not already in `user_sessions`.
+- **Tests required:** unit tests for password validation and hashing;
+  integration tests for change, wrong-current-password, session list,
+  single revoke, and revoke-all, including cross-user denial.
+- **Completion criteria:** a signed-in user can change their password
+  and manage sessions, with no other user's sessions visible or
+  revocable, and with the full check and build passing.
+
+## Phase 3 — Complete organization and project lifecycle
+
+- **Goal:** close PRD sections 6 and 7's remaining lifecycle operations.
+- **Tasks, in order:**
+  1. Organization settings — DONE 2026-10-26 (local, uncommitted):
+     PATCH `/api/organizations/{organizationId}` with the same name
+     and slug validation as organization creation, owner/admin-only
+     authorization (members get 403, non-members get 403 via the
+     tenant context, slug conflicts get 409 `SLUG_TAKEN`), an
+     `organization.updated` audit record with previous and new
+     values (no audit row for a no-op save), a dedicated
+     `organization-settings-user` rate-limit scope in migration 0028
+     (function allowlist and table CHECK, following the 0023
+     pattern; no table or RLS change was needed because the
+     `organizations_update_admin` policy and grants already allow
+     owner/admin name/slug updates), a settings form on the
+     organization page for owners/admins, schema tests, migration
+     guards, and disposable-DB integration tests (authorization,
+     audit, validation, conflict, no-op, malformed id).
+  2. Project deletion — DONE 2026-10-26 (local, uncommitted): DELETE route
+     with optimistic version, lifecycle lock, `project.deleted` audit, and
+     the existing authorization model (managers, project owner, org
+     owners/admins); immediate invisibility across lists, search,
+     analytics, activity, and notifications; 30-day purge via migrations
+     0024–0027 including the cleanup command's `--dry-run` mode; full
+     matrix verified (disposable-DB integration, guards, production build,
+     18 browser checks). Milestone deletion — DONE 2026-10-26 (local,
+     uncommitted): DELETE route with optimistic version, lifecycle lock,
+     `milestone.deleted` audit, and the existing authorization model
+     (managers, project owner, org owners/admins; members get 403,
+     non-members get 403 via the tenant context, cross-tenant gets 404);
+     immediate invisibility across milestone lists, detail, dependencies,
+     task reads, analytics, and activity; 30-day purge via migrations
+     0029–0031 (tasks detached, never deleted; dependency rows removed
+     both directions; audit retained; deleter tenant context for the
+     task-detach trigger; per-milestone failure isolation with a warning
+     for archived projects); cleanup command `--dry-run` and shortfall
+     warning; danger-zone confirmation UI on the milestones page;
+     disposable-DB integration (authorization, invisibility, completed-
+     project rejection, purge boundaries at 29/31 days, task detach,
+     audit preservation, app-role purge grant, archived-project skip,
+     `--dry-run` safety), migration guards, and schema tests.
+  3. Organization deletion — DONE 2026-10-26 (local, uncommitted):
+     DELETE route with slug confirmation (`{ slug }` must match,
+     mismatch 409 `ORGANIZATION_SLUG_MISMATCH`), owner-only
+     authorization (admins 403 `ORGANIZATION_MANAGEMENT_REQUIRED`,
+     non-members 403 via the tenant context, already-deleted 404),
+     `organization.deleted` audit, and immediate invisibility via
+     `withOrganizationContext` rejecting non-active organizations
+     (projects, search, notifications, activity, members, tasks, and
+     files under a deleted workspace all return 404
+     `ORGANIZATION_NOT_FOUND`; the organization list already filtered
+     `status = 'active'`). 30-day purge via migration 0033 (children
+     in foreign-key order, files keys returned for disk removal,
+     notifications cascading from projects, per-organization failure
+     isolation with a warning, marker row per purged organization);
+     audit retained indefinitely and the organization row kept as a
+     tombstone with its slug reserved, because
+     `audit_events.organization_id` is ON DELETE RESTRICT — this is
+     the retention decision the phase left open, decided here and
+     recorded in `DATABASE.md`. The deleter foreign key points at
+     users, not memberships, so the purge itself is not blocked.
+     Danger-zone confirmation UI on the organization page requires
+     typing the workspace address. Disposable-DB integration
+     (authorization, confirmation, invisibility, purge boundaries at
+     29/31 days, tombstone + audit preservation, slug reservation,
+     `--dry-run` safety, real-run file removal), migration guards,
+     schema tests, and a browser check all pass; one pre-existing
+     project-deletion script test's dry-run regex was updated for the
+     new dry-run line format (organizations now lead), with the same
+     assertions. This was the last item in the phase because it is
+     the most destructive and depends on the retention design.
+- **Files or modules likely affected:** `src/server/` organization and
+  project modules, `src/app/components/organization-page.tsx`,
+  `src/app/components/project-page.tsx`, migrations (new, numbered).
+- **Dependencies:** Phase 2 (account security) and the retention
+  design in `DATABASE.md` section 9.
+- **Database/API changes:** new endpoints for settings and deletion;
+  new migrations for any lifecycle columns or cascade rules.
+- **Tests required:** integration tests for each deletion path,
+  including cross-tenant denial, confirmation handling, and audit
+  records; tests that a deleted project's tasks, comments, and files
+  are handled exactly as the documented cascade says.
+- **Completion criteria:** settings and deletion work end to end,
+  with confirmation, audit, and cross-tenant denial verified, and no
+  orphaned task, comment, or file row left by a deletion.
+
+## Phase 4 — Production foundations: storage, cleanup, observability
+
+- **Goal:** make the existing product deployable and observable, before
+  realtime or AI multiplies its operational surface.
+- **Tasks, in order:**
+  1. Schedule the file-retention/orphan cleanup command daily, by the
+     operator, and verify that it runs (not merely that the script
+     exists). Record where the schedule lives.
+     **Blocked 2026-10-26 (no production environment exists yet to
+     schedule against):** there is no deployed Nexora, no production
+     database reachable from this VM (Neon direct TCP is blocked),
+     and no production file directory, so installing a cron here
+     would point at nothing and prove nothing. The schedule
+     definition is ready to install at deploy time and is recorded
+     here so it is not lost: run `node
+     scripts/cleanup-task-files.mjs` daily (off-peak) with
+     `DATABASE_URL` set to the restricted runtime role and
+     `NEXORA_PRIVATE_FILE_DIR` set to the production private-file
+     directory, from a host that can reach the production database.
+     The full deploy procedure, including this schedule and the
+     backup job, is now recorded in `docs/deployment.md` §6;
+     keep the run's stdout as the audit trail (the script logs
+     project purge, milestone purge with detached-task counts, file
+     purge, and orphan counts, plus a shortfall warning when a
+     purge skips rows). The script itself is already verified:
+     integration tests cover `--dry-run` reporting without
+     deleting and real runs purging + detaching (project deletion,
+     milestone deletion suites). Do not schedule it against a
+     disposable database: that verifies nothing about production.
+  2. Durable encrypted shared file storage: replace or wrap the local
+     filesystem backend with a shared object-storage adapter, with the
+     same authorization, signing, and integrity checks, and a
+     migration path for existing files.
+  3. Optional malware scanning for uploads, gated so that a scanning
+     failure does not silently accept or silently drop a file.
+  4. Observability beyond request-failure logs: health and readiness
+     checks (building on the Phase 1 liveness endpoint), structured
+     metrics for request latency, error rate, database latency, and
+     queue/job failures where they exist, and alerts for actionable
+     failures only. No sensitive data in logs or metrics.
+     **Implemented 2026-10-26 (local, unpushed; metrics + readiness
+     done, alerts pending a channel decision):** `GET /api/ready`
+     (200 only when the database probe succeeds, else 503, no
+     detail); `GET /api/metrics` (token-authenticated via
+     `NEXORA_METRICS_TOKEN`, fails closed 503 when unset, see
+     `API.md` §2.1 and `ARCHITECTURE.md` §7 observability); counters
+     collected at the shared JSON helpers in `src/server/api.ts`
+     with no per-route code (`src/server/metrics.ts`: normalized
+     paths, status classes, failures by operation, capped path
+     table, process-local); database probe latency + pool counters
+     via `getDatabasePoolStats()` in `src/server/db.ts`. Request
+     latency per endpoint is NOT reported as a histogram: the
+     counters record counts and error rates, and the database probe
+     latency is the latency signal; a per-request latency histogram
+     would need middleware or per-route timing, which the codebase
+     deliberately does not have (no middleware; handlers are the
+     unit). Queue/job failure metrics are not applicable: Nexora
+     has no queue or background job system (cleanup is an
+     operator-run script). Alerts are NOT implemented in-app: they
+     need an operator channel decision (email address or webhook);
+     the intended alert source is an external monitor scraping
+     `/api/metrics` (alert on 5xx rate and on `database.up` false)
+     plus the existing structured failure logs. Tests:
+     `tests/metrics.test.ts` (normalization, counting) and
+     `tests/metrics-endpoint.integration.test.ts` (503 without
+     token, 401 wrong token, 200 with token, counter deltas,
+     readiness 200, no user data in payload).
+     **Update 2026-10-26 (realtime counters):** `GET /api/metrics`
+     now also reports live/total stream connections, events
+     published, and events enqueued to streams
+     (`src/server/metrics.ts`: connect/disconnect counted at stream
+     start/close, publish counted only after the publish transaction
+     commits, delivery counted per event enqueued; "delivered" means
+     enqueued, not client-acknowledged). The §9a observability gap
+     for stream counters is closed; per-request latency histograms
+     and alerting remain future work.
+  5. Backup and recovery verification: restore the database (including
+     RLS, functions, and grants) and the file directory to a disposable
+     environment, and verify with the health endpoint and a
+     signed-download check.
+     **Verified 2026-10-26 (local, disposable databases, repeatable
+     script at `~/workspace/nexora-restore-test/restore-test.sh` with
+     `generate-fixture.mjs`):** source DB built from migrations
+     0001–0032 + grants with a fixture user, org, project, task,
+     task file, and OAuth identity, plus one private file; `pg_dump`
+     custom format restored into a fresh DB; all 11 compared tables
+     matched (including 5 auto-seeded task statuses and 32 schema
+     migrations); RLS intact (app role sees 0 users without tenant
+     context); `lookup_oauth_identity` intact; 46 nexora functions
+     present; FORCE RLS on `notifications` survived; restored file
+     bytes matched sha256; production build against the restored DB
+     passed health (`database: up`), login, signed-URL issuance, and
+     a signed download returning the original bytes. **Operational
+     finding:** the dump MUST run as a superuser or another
+     BYPASSRLS role, not as the migrator — `notifications` has
+     FORCE ROW LEVEL SECURITY, so even its owner cannot COPY it out
+     (`pg_dump` fails with "query would be affected by row-level
+     security policy"); the superuser dump still records the
+     migrator as owner of every object, so the restore keeps
+     ownership. Record this rule wherever the production backup job
+     is defined; a migrator-role backup job silently fails.
+- **Files or modules likely affected:** `scripts/cleanup-task-files.mjs`,
+  `src/server/private-file-storage.ts`, `src/server/task-files.ts`,
+  deployment configuration (outside this repository's code, to be
+  recorded in `ARCHITECTURE.md`).
+- **Dependencies:** Phases 1–3. Shared storage must not be built before
+  the deletion lifecycle (Phase 3) is decided, or deletion and purge
+  will diverge.
+- **Database/API changes:** none required for items 1, 4, and 5; item 2
+  may require a migration if file metadata must record a storage
+  backend or location.
+- **Tests required:** cleanup-command tests against a disposable
+  database and filesystem; storage-adapter tests for upload, download,
+  replacement, and deletion, including authorization denial; a
+  documented, actually performed restore test.
+- **Completion criteria:** cleanup runs on a schedule and is proven
+  to run; files survive a multi-instance deployment; backups restore
+  to a verified, working state; alerts fire for a real failure and
+  stay silent for a healthy system.
+
+## Phase 5 — Realtime (PRD 25), only after Phases 1–4
+
+- **Goal:** authenticated, authorized, recoverable realtime
+  synchronization, with the database remaining authoritative.
+- **Tasks, in order:**
+  1. Design: transport, authenticated connection, authorized channel
+     subscriptions (organization and project scoped), event IDs and
+     versioning, reconnection with backoff, resynchronization, stale-
+     client recovery, connection cleanup, and rate limits. Record the
+     design in `ARCHITECTURE.md` and `API.md` before writing transport
+     code.
+     **Designed and implemented 2026-10-26 (local, unpushed; M6):**
+     see ARCHITECTURE.md §9a and API.md §2.1b.
+  2. Implement the transport and the event set: task, project, and
+     comment events, notification events, and presence, each emitted
+     only after a committed database change.
+     **Implemented 2026-10-26 (local, unpushed; M6):** migration 0036
+     (`realtime_events`: per-project versions, UNIQUE
+     (organization, project, version), project CASCADE, RLS member
+     policies, scope `realtime-connect-user` in both allowlists);
+     `src/server/realtime/events.ts` (publish under the project
+     task-graph lock, pure replay planner); SSE stream route
+     (session-cookie auth, `can_access_current_project` gate,
+     hello/replay/resync, 2s poll, 15s heartbeat, abort cleanup);
+     producers wired after commit for task.created, task.updated,
+     task.deleted (archive), comment.created, project.updated, each
+     with publish failures logged, never failing the mutation.
+     NOT built: notification.created — notifications have their own
+     centre and delivery over a stream needs a user-level channel
+     decision; documented future work, not claimed.
+     **Implemented 2026-10-26 (local, unpushed; presence):**
+     `presence.changed` as ephemeral roster state from an
+     in-process registry (`src/server/realtime/presence.ts`), sent
+     over the same stream without an event id after `hello` and on
+     every roster change via the poll loop; `RealtimePanel` shows
+     "Online now". Honest limits: per-process roster (multi-instance
+     members absent) and dead sockets linger until the runtime
+     closes the stream. Tests: `tests/realtime-presence.test.ts`
+     (registry units) + a two-client join/leave case in
+     `tests/realtime.integration.test.ts`.
+  3. Client recovery: a disconnected client shows a reconnecting state,
+     falls back to refresh/polling, and reconciles on reconnect without
+     silently overwriting newer authoritative data.
+     **Implemented 2026-10-26 (local, unpushed; M6):**
+     `RealtimePanel` (connection state, last event, "refresh to see
+     the latest work" notice — it never rewrites page state itself,
+     so no silent overwrite is possible); EventSource reconnects
+     with the last event id automatically. Tests:
+     `tests/realtime.test.ts` (replay boundaries),
+     `tests/realtime.integration.test.ts` (401, 403, cross-org 404,
+     sequential versions, replay-only-missed, task + comment wiring
+     end to end, two-client live delivery, two-client presence
+     join/leave), `tests/migration-guards.test.mjs` (0036).
+- **Files or modules likely affected:** a new realtime module, the
+  existing project/task/comment/notification emitters, and the
+  project and task screens.
+- **Dependencies:** Phases 1–4, especially the authorization model and
+  the observability work (connection counts and event rates must be
+  measurable).
+- **Database/API changes:** an event or outbox table only if the design
+  requires it; otherwise, no schema change. A new endpoint or channel
+  contract, documented in `API.md`.
+- **Tests required:** integration tests for unauthenticated connection
+  rejection, cross-tenant subscription denial, event ordering and
+  versioning, reconnection and resynchronization, and stale-client
+  reconciliation.
+- **Completion criteria:** two clients in the same project see each
+  other's committed changes, a client in another organization sees
+  nothing, and a disconnected client recovers without data loss or
+  silent overwrite.
+
+## Phase 6 — AI (PRD 17–24), only after Phase 5's authorization design
+
+- **Goal:** AI embedded in real workflows, with authorization,
+  evaluation, and cost controls, not a chatbot bolted onto the product.
+- **Tasks, in order:**
+  1. Provider abstraction layer and execution records, with token,
+     request, per-user, per-organization, and timeout limits, and cost
+     tracking. No business logic calls a provider directly.
+     **Implemented 2026-10-26 (local, unpushed; M1):** migration 0034
+     (`ai_executions`, metadata only, RLS own-row policies, purge
+     step, scopes `ai-request-user`/`ai-request-org` in both
+     allowlists); `src/server/ai/provider.ts` (mock test double
+     refused in production, generic OpenAI-compatible HTTP provider,
+     30s timeout, fail-closed 503 when unconfigured, no key/prompt in
+     errors); `src/server/ai/execution.ts` (start/complete/fail in
+     short transactions around the provider call); per-user 60/hour
+     and per-organization 120/hour limits (the rate-limit function
+     caps any limit at 120); cost tracking as token counts per
+     execution (no currency field until a provider's pricing is
+     configured). Tests: `tests/ai-platform.test.ts`,
+     `tests/migration-guards.test.mjs` (0034), integration below.
+  2. Authorized context retrieval: the only data an AI workflow may
+     see is data the requesting user can already access, through the
+     same tenant gates.
+     **Implemented 2026-10-26 (local, unpushed; M1):**
+     `src/server/ai/context.ts` (project context via
+     `can_access_current_project` + the activity route's exact
+     project scoping; budgets 20 milestones / 50 tasks / 10 activity
+     / 20 comments / 12,000 chars; display names only; secret-pattern
+     redaction; DATA BEGINS/ENDS untrusted-data delimiters). First
+     workflow on this platform: summarization (PRD 20) —
+     `POST /api/organizations/{id}/ai/summarize` (read-only, labelled
+     `aiGenerated`), `GET .../ai/executions` (own metadata only),
+     `AiSummaryPanel` on the project page. Tests:
+     `tests/ai-summarize.integration.test.ts` (401, 503 unconfigured,
+     200 labelled + succeeded row, cross-org 404, non-member 403).
+  3. Project planning from a goal: structured output, validated, and
+     presented for explicit confirmation before any milestone or task
+     is created.
+     **Implemented 2026-10-26 (local, unpushed; M2):** migration 0035
+     (`ai_creation_idempotency`: organization-level, actor-scoped,
+     operations `planning.confirm`/`extraction.confirm`, 7-day expiry,
+     RLS actor policies, purge step); generate route (draft only,
+     strict output schema, `aiGenerated` label, execution record);
+     confirm route (one transaction; dependency titles validated
+     BEFORE any insert — unknown/ambiguous/cycle rejected with
+     nothing created; project + creator manager membership + audits
+     + first workflow status + milestones/tasks/subtasks/edges;
+     idempotency replay/conflict); `AiPlanningPanel` on the
+     organization page (goal → draft review → project name →
+     confirm; one key per draft, reused on retry). Tests:
+     `tests/ai-planning.integration.test.ts` (503 unconfigured,
+     draft creates nothing, confirm creates with counts, replay
+     same project, key conflict, unknown/ambiguous/cycle create
+     nothing, valid dependency edge exists, missing key 400,
+     non-member 403), `tests/migration-guards.test.mjs` (0035).
+  4. Meeting-notes extraction: tasks, owners, deadlines, decisions,
+     follow-ups, and risks, presented for review before creation.
+     **Implemented 2026-10-26 (local, unpushed; M3):** generate route
+     (draft only, notes as the prompt's untrusted-data block, strict
+     output schema, execution record) and confirm route (one
+     transaction into an EXISTING project; `can_work` gate, closed
+     projects rejected; owners stay name-text lines, deadlines become
+     `due_date` only when real ISO dates; idempotency via the 0035
+     table with the project id in the request hash, plus an advisory
+     lock on the idempotency scope; decisions/follow-ups/risks echoed
+     as informational output, not persisted — no project-level record
+     type exists for them); `AiExtractionPanel` on the project page
+     (notes → draft review → confirm). Tests:
+     `tests/ai-extraction.integration.test.ts` (503 unconfigured,
+     draft creates nothing, ISO deadline → due_date, vague deadline
+     and owner stay text, replay same tasks, key conflict, missing
+     key 400, non-member 403, cross-organization project 404).
+  5. Summarization, risk analysis, and the project assistant, each
+     labelled as AI-generated, each with its own evaluation cases.
+     **Implemented 2026-10-26 (local, unpushed; M4, risk + assistant;
+     summarization was M1):** `POST .../ai/risk` (read-only, strict
+     risk output schema, findings labelled as possibilities) and
+     `POST .../ai/assistant` (read-only, question 1–1000 chars,
+     authorization before retrieval via the shared context builder);
+     `AiRiskPanel` and `AiAssistantPanel` on the project page. Tests:
+     `tests/ai-risk-assistant.integration.test.ts` (401, 503
+     unconfigured with no execution row, 200 labelled + succeeded
+     risk row, assistant 200 labelled, question-too-long 400,
+     non-member 403, cross-organization project 404). Evaluation
+     cases for these workflows belong to task 6 (M5).
+  6. Evaluation framework: representative cases for correctness,
+     structured-output validity, authorization, prompt-injection
+     resistance, hallucination behaviour, safe failure, confirmation,
+     cost, and latency, recorded with provider, model, and version.
+     **Implemented 2026-10-26 (local, unpushed; M5):**
+     `src/server/ai/evaluation.ts` (taxonomy + result record +
+     summary) and `tests/ai-evaluation.integration.test.ts` (10
+     cases: 8 passing against the mock, 2 blocked pending a real
+     provider — live hallucination measurement and live
+     prompt-injection resistance; the mock-scope injection case
+     proves delimiter/context handling only). No new endpoint: the
+     framework is a test-time record, not a UI.
+- **Files or modules likely affected:** a new AI module, the project
+  and task creation flows (confirmation UI), and the analytics screen
+  (where AI insights must be visually distinct from calculated metrics).
+- **Dependencies:** Phases 1–5. AI must not be built before realtime's
+  authorization design, because AI context retrieval reuses the same
+  tenant gates, and must not be built before the cost-control design,
+  because an unbounded AI workflow is a billing incident.
+- **Database/API changes:** AI execution records, and endpoints for
+  planning, extraction, summarization, risk, and assistant queries,
+  each with authorization, validation, and idempotency for
+  consequential creation.
+- **Tests required:** evaluation cases (not just unit tests) for each
+  workflow, including cross-tenant context denial, prompt-injection
+  resistance, invalid structured output, and confirmation-before-
+  creation.
+- **Completion criteria:** each AI workflow works end to end with
+  authorized context only, validated output, explicit confirmation
+  for creation, labelled results, and recorded evaluation evidence.
+  No AI quality claim is made without that evidence.
+
+## Phase 7 — Final production audit
+
+- **Goal:** an end-to-end readiness verdict, not a claim from code
+  existence.
+- **Tasks:** verify every critical user journey, UI consistency,
+  functional correctness, authentication and authorization, database
+  integrity, API and integrations, security, tests and regressions,
+  performance (measured, not asserted), responsive behaviour,
+  accessibility (keyboard, screen reader, contrast, focus, reduced
+  motion), error/loading/empty states, environment and deployment
+  configuration, monitoring, backups, and recovery.
+- **Dependencies:** Phases 1–6, and a production-like environment for
+  the checks that cannot be done locally (SMTP, trusted ingress, CSP
+  in a real browser, encryption, shared storage).
+- **Tests required:** the full suite, plus end-to-end journey tests,
+  a security review, an accessibility acceptance pass, and a
+  performance measurement pass.
+- **Completion criteria:** a written verdict — READY, READY WITH
+  WARNINGS, or NOT READY — with findings by severity, required fixes,
+  tests performed, and anything that must be manually verified before
+  launch. A verdict of READY requires every blocker to be closed and
+  every warning to be explicitly accepted by the user.
+
+## Open decisions (genuinely need the user; not invented here)
+
+- **Session rotation (PRD §5.1).** The PRD names "Session rotation"
+  exactly once, in a feature list, with no policy: no trigger, no
+  interval, no acceptance criterion, and no design in ARCHITECTURE.md.
+  What already exists: a fresh opaque token per login, 14-day expiry,
+  revoke-all-others on password change, and the /account session list
+  with per-session and revoke-all revocation. Deciding rotation means
+  choosing a trigger (every request, periodic sliding refresh,
+  privilege change, or login only — login-only rotation already
+  exists) and each choice changes security behaviour and the
+  multi-tab experience, so it is not a routine decision. Blocked on
+  the user's policy choice.
+- **Email delivery for notifications (PRD §13).** The PRD requires
+  in-app notifications (implemented: recipient-scoped read/unread,
+  preferences, deduplication, mention/assignment/change/membership
+  emitters) and explicitly defers email with "design the architecture
+  so email notifications can be added safely later." Sending email
+  from the emitters needs a delivery design first: synchronous sends
+  would slow every mutation request and fail it on SMTP failure;
+  the durable alternative (outbox table + worker, or an external
+  provider) is a new subsystem with no design in ARCHITECTURE.md and
+  no queue/worker infrastructure in the app. Due-date notifications
+  additionally need a scheduler (same blocked class as cleanup
+  scheduling: no production environment), and AI workflow-completion
+  notifications need the AI pillars. Blocked on the user's delivery
+  design choice.
+- **Alert channel (Phase 4 item 4).** Metrics exist and an external
+  monitor can scrape `/api/metrics` today; the in-app alert channel
+  (email address or webhook) is the user's choice.
+- **Shared object storage (Phase 4 item 2) and malware scanning
+  (item 3).** Both need an external-service choice plus credentials;
+  no SDK is added without a design in ARCHITECTURE.md.
+- **AI (PRD 17–22, 24) and realtime (PRD 25).** No design yet; need
+  user decisions and no new SDK dependencies without one.
+
+## Recommended first task
+
+Start Phase 1, item 1: fix the email-delivery failure gap. It is the
+smallest change that prevents a user-facing falsehood (an account that
+is told a verification link "will arrive" when it never will), it blocks
+Phase 2's account work, and it can be verified with a local test SMTP
+server and a disposable database. Do not start Phase 5 or Phase 6
+before it.

@@ -139,9 +139,12 @@ export default function WorkspacePage({ mode }: WorkspacePageProps) {
         <div className="workspace-card">
           <div className="workspace-topline">
             <span className="auth-kicker">Your Nexora</span>
-            <button className="quiet-button" type="button" onClick={signOut} disabled={pending}>
-              Sign out
-            </button>
+            <div className="workspace-topline-actions">
+              <a className="quiet-button" href="/account">Account security</a>
+              <button className="quiet-button" type="button" onClick={signOut} disabled={pending}>
+                Sign out
+              </button>
+            </div>
           </div>
           <p className="eyebrow workspace-greeting">{displayName ? `Welcome, ${displayName}` : "Workspace setup"}</p>
           <h2 id="workspace-title">{mode === "create" ? "Create a workspace." : "Your workspaces."}</h2>

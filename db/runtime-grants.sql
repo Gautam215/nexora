@@ -17,6 +17,13 @@ GRANT EXECUTE ON FUNCTION nexora.list_current_project_members(uuid, uuid) TO nex
 GRANT EXECUTE ON FUNCTION nexora.can_work_current_project(uuid, uuid) TO nexora_app;
 GRANT EXECUTE ON FUNCTION nexora.enqueue_project_notification(uuid, uuid, uuid, uuid, text, text, uuid, text, text, text, text) TO nexora_app;
 GRANT EXECUTE ON FUNCTION nexora.purge_expired_task_files() TO nexora_app;
+GRANT EXECUTE ON FUNCTION nexora.purge_expired_projects() TO nexora_app;
+GRANT EXECUTE ON FUNCTION nexora.list_expired_projects() TO nexora_app;
+GRANT EXECUTE ON FUNCTION nexora.purge_expired_milestones() TO nexora_app;
+GRANT EXECUTE ON FUNCTION nexora.list_expired_milestones() TO nexora_app;
+GRANT EXECUTE ON FUNCTION nexora.purge_expired_organizations() TO nexora_app;
+GRANT EXECUTE ON FUNCTION nexora.list_expired_organizations() TO nexora_app;
+GRANT EXECUTE ON FUNCTION nexora.list_expired_task_files() TO nexora_app;
 GRANT EXECUTE ON FUNCTION nexora.list_unreferenced_task_file_keys(uuid[]) TO nexora_app;
 GRANT EXECUTE ON FUNCTION nexora.searchable_task_labels(text[]) TO nexora_app;
 GRANT EXECUTE ON FUNCTION nexora.lock_project_dependency_graph(uuid, uuid, text) TO nexora_app;
@@ -58,9 +65,16 @@ REVOKE ALL PRIVILEGES ON TABLE
 FROM nexora_app;
 
 GRANT SELECT (id, email, display_name, status, email_verified_at, created_at, updated_at),
-  INSERT (id, email, display_name, password_hash),
+  INSERT (id, email, display_name, password_hash, email_verified_at),
   UPDATE (display_name, password_hash)
 ON TABLE nexora.users TO nexora_app;
+
+GRANT SELECT (id, user_id, provider, provider_subject, provider_email, created_at, last_used_at),
+  INSERT (id, user_id, provider, provider_subject, provider_email),
+  UPDATE (provider_email, last_used_at)
+ON TABLE nexora.oauth_identities TO nexora_app;
+
+GRANT EXECUTE ON FUNCTION nexora.lookup_oauth_identity(text, text) TO nexora_app;
 
 GRANT SELECT (id, user_id, created_at, last_seen_at, expires_at, revoked_at),
   INSERT (id, user_id, token_hash, expires_at),
@@ -69,7 +83,7 @@ ON TABLE nexora.user_sessions TO nexora_app;
 
 GRANT SELECT (id, name, slug, status, created_by, created_at, updated_at),
   INSERT (id, name, slug, created_by),
-  UPDATE (name, slug, status)
+  UPDATE (name, slug, status, deleted_at, deleted_by_user_id, purged_at)
 ON TABLE nexora.organizations TO nexora_app;
 
 GRANT SELECT (organization_id, user_id, role, status, invited_by, joined_at, created_at, updated_at),
@@ -84,13 +98,14 @@ ON TABLE nexora.organization_invitations TO nexora_app;
 
 GRANT SELECT (
     id, organization_id, name, description, status, owner_user_id,
-    start_date, target_date, version, task_workflow_version, created_at, updated_at
+    start_date, target_date, version, task_workflow_version, created_at, updated_at,
+    deleted_at, deleted_by_user_id
   ),
   INSERT (
     id, organization_id, name, description, owner_user_id,
     start_date, target_date
   ),
-  UPDATE (name, description, status, start_date, target_date, task_workflow_version)
+  UPDATE (name, description, status, start_date, target_date, task_workflow_version, deleted_at, deleted_by_user_id)
 ON TABLE nexora.projects TO nexora_app;
 
 GRANT SELECT (
@@ -105,13 +120,14 @@ ON TABLE nexora.project_memberships TO nexora_app;
 
 GRANT SELECT (
     id, organization_id, project_id, name, description, start_date, end_date,
-    status, created_by_user_id, version, completed_at, created_at, updated_at
+    status, created_by_user_id, version, completed_at, created_at, updated_at,
+    deleted_at, deleted_by_user_id
   ),
   INSERT (
     id, organization_id, project_id, name, description, start_date, end_date,
     created_by_user_id
   ),
-  UPDATE (name, description, start_date, end_date, status)
+  UPDATE (name, description, start_date, end_date, status, deleted_at, deleted_by_user_id)
 ON TABLE nexora.milestones TO nexora_app;
 
 GRANT SELECT (
@@ -187,6 +203,29 @@ GRANT SELECT (
   ),
   UPDATE (read_at)
 ON TABLE nexora.notifications TO nexora_app;
+
+GRANT SELECT (
+    id, organization_id, project_id, user_id, workflow, provider, model, status,
+    prompt_tokens, completion_tokens, latency_ms, error_code, created_at, completed_at
+  ),
+  INSERT (id, organization_id, project_id, user_id, workflow, provider, model, status),
+  UPDATE (status, prompt_tokens, completion_tokens, latency_ms, error_code, completed_at)
+ON TABLE nexora.ai_executions TO nexora_app;
+
+GRANT SELECT (
+    organization_id, actor_user_id, operation, key_hash, request_hash,
+    response_status, response_body, created_at, expires_at
+  ),
+  INSERT (
+    organization_id, actor_user_id, operation, key_hash, request_hash,
+    response_status, response_body
+  ),
+  DELETE
+ON TABLE nexora.ai_creation_idempotency TO nexora_app;
+
+GRANT SELECT (id, organization_id, project_id, type, version, data, created_at),
+  INSERT (id, organization_id, project_id, type, version, data)
+ON TABLE nexora.realtime_events TO nexora_app;
 
 GRANT SELECT (
     id, organization_id, project_id, task_id, original_filename, mime_type,

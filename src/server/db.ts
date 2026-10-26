@@ -16,6 +16,20 @@ export class OrganizationAccessDenied extends Error {
   }
 }
 
+// Thrown when the organization exists but is not active (soft-deleted or
+// otherwise closed). Routes map this to 404 ORGANIZATION_NOT_FOUND: a
+// deleted workspace is gone, not merely forbidden. A missing membership
+// still throws OrganizationAccessDenied, preserving the existing
+// non-member contract.
+export class OrganizationNotFound extends Error {
+  readonly code = "ORGANIZATION_NOT_FOUND";
+
+  constructor() {
+    super("Organization not found");
+    this.name = "OrganizationNotFound";
+  }
+}
+
 export class TransactionCommitOutcomeUnknown extends Error {
   readonly cause: unknown;
 
@@ -31,23 +45,95 @@ const globalForDatabase = globalThis as typeof globalThis & {
   nexoraPool?: Pool;
 };
 
+function isNeonConnectionString(connectionString: string): boolean {
+  try {
+    return new URL(connectionString).hostname.endsWith(".neon.tech");
+  } catch {
+    return false;
+  }
+}
+
+function requireNeonSsl(connectionString: string): void {
+  // Neon rejects plaintext connections at its proxy with a cryptic
+  // "connection is insecure" error. Fail fast here, with a message that
+  // names the fix, instead of letting that proxy error surface as a
+  // generic 500. A Neon URL copied from the Neon console already carries
+  // sslmode=require, so this only rejects URLs that had it stripped.
+  try {
+    const url = new URL(connectionString);
+    if (url.hostname.endsWith(".neon.tech") && !url.searchParams.has("sslmode")) {
+      throw new Error(
+        "DATABASE_URL for Neon must include sslmode=require (for example, ?sslmode=require).",
+      );
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("DATABASE_URL for Neon")) {
+      throw error;
+    }
+    // An unparseable URL is pg's problem to report, not ours to mask.
+  }
+}
+
 function getPool(): Pool {
   if (globalForDatabase.nexoraPool) return globalForDatabase.nexoraPool;
 
   const connectionString = process.env.DATABASE_URL;
   if (!connectionString) throw new Error("Database is not configured");
+  requireNeonSsl(connectionString);
 
+  const isNeon = isNeonConnectionString(connectionString);
   const pool = new Pool({
     connectionString,
     application_name: "nexora-web",
     max: 12,
-    connectionTimeoutMillis: 5_000,
+    // Neon computes scale to zero and need a TLS handshake plus a wake-up
+    // before the first query can run. The previous 5s limit turned that
+    // wake-up into an intermittent first-request failure; 15s is only
+    // applied to Neon hosts and leaves local/test timeouts unchanged.
+    connectionTimeoutMillis: isNeon ? 15_000 : 5_000,
     idleTimeoutMillis: 30_000,
     statement_timeout: 10_000,
     query_timeout: 12_000,
   });
+  // pg emits "error" for idle clients that die underneath the pool
+  // (for example, a suspended Neon compute). Without a listener, that
+  // event throws and can take the process down; logging it lets the
+  // pool discard the dead client and the next request reconnect.
+  pool.on("error", (error) => {
+    console.error(JSON.stringify({ event: "database.pool_error", errorName: error.name }));
+  });
   globalForDatabase.nexoraPool = pool;
   return pool;
+}
+
+export async function checkDatabaseConnection(): Promise<boolean> {
+  // Cheap condition first: without a configured URL there is nothing to
+  // probe, and getPool() would throw. A failed probe is a boolean, never
+  // an error detail, because the health endpoint must not leak it.
+  if (!process.env.DATABASE_URL) return false;
+  try {
+    await getPool().query("SELECT 1");
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Pool counters for the operator metrics endpoint. Returns null when no
+// pool exists yet (no DATABASE_URL configured). These are counts only,
+// never connection strings, credentials, or query text.
+export function getDatabasePoolStats(): {
+  total: number;
+  idle: number;
+  waiting: number;
+} | null {
+  const pool = globalForDatabase.nexoraPool;
+  if (!pool) return null;
+  return {
+    total: pool.totalCount,
+    idle: pool.idleCount,
+    waiting: pool.waitingCount,
+  };
 }
 
 export async function closeDatabasePool(): Promise<void> {
@@ -171,6 +257,24 @@ export function withOrganizationContext<T>(
       throw new OrganizationAccessDenied();
     }
 
+    // Immediate invisibility for soft-deleted organizations: every
+    // organization-scoped route runs through this helper, so rejecting
+    // non-active organizations here hides a deleted workspace from
+    // project lists, search, notifications, activity, members, tasks,
+    // and files at once, without a filter at each site. The
+    // organization row itself is still readable by its own DELETE
+    // route's row query (which reports an already-deleted workspace as
+    // not found), and the organization list/detail routes already
+    // filter status = 'active'.
+    const organizationResult = await client.query<{ status: string }>(
+      "SELECT status FROM nexora.organizations WHERE id = $1 LIMIT 1",
+      [organizationId],
+    );
+    const organizationStatus = organizationResult.rows[0]?.status;
+    if (organizationStatus !== undefined && organizationStatus !== "active") {
+      throw new OrganizationNotFound();
+    }
+
     await client.query(
       "SELECT pg_catalog.set_config('nexora.organization_id', $1, true)",
       [organizationId],
@@ -198,6 +302,28 @@ export async function lookupLoginAccount(email: string): Promise<LoginAccount | 
   const result = await getPool().query<LoginAccount>(
     "SELECT user_id, email, display_name, password_hash, status, email_verified_at FROM nexora.lookup_user_for_login($1)",
     [email],
+  );
+  return result.rows[0] ?? null;
+}
+
+export interface OAuthIdentityLookup {
+  user_id: string;
+  status: string;
+  email_verified_at: Date | null;
+}
+
+/**
+ * Pre-auth OAuth lookup by (provider, subject) through the SECURITY
+ * DEFINER function. Returns only user_id, status, and
+ * email_verified_at -- never email, display_name, or password_hash.
+ */
+export async function lookupOAuthIdentity(
+  provider: string,
+  subject: string,
+): Promise<OAuthIdentityLookup | null> {
+  const result = await getPool().query<OAuthIdentityLookup>(
+    "SELECT user_id, status, email_verified_at FROM nexora.lookup_oauth_identity($1, $2)",
+    [provider, subject],
   );
   return result.rows[0] ?? null;
 }

@@ -46,6 +46,7 @@ export default function ProjectMilestonesPage({
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
   const [pending, setPending] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<Milestone | null>(null);
   const [createKey, setCreateKey] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -158,6 +159,36 @@ export default function ProjectMilestonesPage({
     } catch {
       setError("The service could not be reached. Try again in a moment.");
       return false;
+    } finally {
+      setPending("");
+    }
+  }
+
+  async function deleteMilestone(milestone: Milestone) {
+    setPending(`delete-${milestone.id}`);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch(`${base}/${encodeURIComponent(milestone.id)}`, {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ expectedVersion: milestone.version }),
+      });
+      const result = (await response.json().catch(() => null)) as ApiResult<unknown> | null;
+      if (response.status === 401) {
+        window.location.assign("/login");
+        return;
+      }
+      if (!response.ok) {
+        setError(result?.error?.message ?? "Milestone could not be deleted.");
+        if (response.status === 409) setReloadKey((value) => value + 1);
+        return;
+      }
+      setDeleteTarget(null);
+      setMessage("Milestone deleted.");
+      setReloadKey((value) => value + 1);
+    } catch {
+      setError("The service could not be reached. Try again in a moment.");
     } finally {
       setPending("");
     }
@@ -374,6 +405,43 @@ export default function ProjectMilestonesPage({
                             <span className="project-version-note">Save checks version {milestone.version}.</span>
                           </div>
                         </form>
+                        <div className="milestone-field-wide">
+                          <button
+                            className="danger-button"
+                            type="button"
+                            disabled={Boolean(pending)}
+                            onClick={() => setDeleteTarget(milestone)}
+                          >
+                            Delete milestone
+                          </button>
+                          {deleteTarget?.id === milestone.id && (
+                            <div className="confirm-panel" role="alertdialog" aria-labelledby="milestone-delete-title">
+                              <p className="eyebrow">Danger zone</p>
+                              <h4 id="milestone-delete-title">Delete {milestone.name}?</h4>
+                              <p>
+                                This milestone will be hidden immediately and permanently removed
+                                after 30 days. Its tasks stay in the project.
+                              </p>
+                              <div className="confirm-actions">
+                                <button
+                                  className="danger-button"
+                                  type="button"
+                                  disabled={Boolean(pending)}
+                                  onClick={() => void deleteMilestone(milestone)}
+                                >
+                                  {pending === `delete-${milestone.id}` ? "Deleting..." : "Delete this milestone"}
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={Boolean(pending)}
+                                  onClick={() => setDeleteTarget(null)}
+                                >
+                                  Keep milestone
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </details>
                     )}
                   </article>

@@ -1,0 +1,366 @@
+# Nexora — Design System
+
+This document is the single source of truth for Nexora's visual design and user
+experience. It describes the design that already exists in the product and the
+rules new screens must follow. Where this document and the shipped CSS disagree,
+the shipped CSS wins until the CSS is deliberately changed, and this document
+must then be updated in the same change.
+
+Source of truth for the product: the Nexora PRD (sections 0, 35, 36, 37) and the
+traceability record in `docs/prd-traceability.md`. This document does not
+describe features that do not exist yet (AI workflows, realtime presence); it
+describes how they must look and behave when they are built.
+
+## 1. Visual direction and design principles
+
+Nexora is a serious, modern SaaS product for teams, not a tutorial dashboard.
+Its visual direction is Apple-inspired and slightly dark: calm surfaces, one
+restrained accent, high information density without clutter, and nothing
+decorative that does not help a user finish a task.
+
+Principles, in priority order:
+
+1. **Clarity before decoration.** Every screen answers, in order: where am I,
+   what is this, what can I do here, what happened last. If a visual element
+   does not serve one of those questions, remove it.
+2. **One accent, used sparingly.** The sage accent marks focus, the brand mark,
+   and the small number of primary actions and status labels that need it. It
+   is not a general highlight colour.
+3. **Density with breathing room.** Project, task, and activity lists are
+   information-dense, but text never crowds a border, and interactive targets
+   are never smaller than a comfortable tap target.
+4. **Server truth, honest states.** A screen never invents a metric, a
+   percentage, or an AI insight. A value with no data shows "no data", not 0%.
+   A failed action says what failed and what to do next.
+5. **Same patterns everywhere.** Auth pages, workspace pages, project pages,
+   and settings use the same shell, forms, cards, tables, and feedback
+   patterns. A new screen reuses an existing pattern; it does not invent a
+   one-off layout.
+6. **Restraint in motion.** Motion signals a state change (a status moved, a
+   panel opened, a drag started). It never decorates a page load, a list, or a
+   card for its own sake.
+
+## 2. Colours and typography
+
+### 2.1 Colour tokens (shipped, in `src/app/globals.css`)
+
+The product is dark-only. There is no light theme, and no screen may introduce
+one without a deliberate, documented change to the token set.
+
+| Token | Value | Use |
+| --- | --- | --- |
+| Background | `#111315` | Page background |
+| Surface | `#191c1f` | Cards, panels, dialogs, raised surfaces |
+| Foreground | `#f2f3f4` | Primary text |
+| Muted | `#a1a6aa` | Secondary text, descriptions, helper text |
+| Border | `#303538` | Dividers, card and input borders |
+| Accent (sage) | `#a9c2b0` | Focus ring, brand mark, eyebrow labels, primary emphasis |
+
+Supporting rules:
+
+- Text on a surface is foreground for primary content and muted for secondary
+  content only. Do not introduce a third text colour for decoration.
+- Status is conveyed by text first, then by a small shape or label — never by
+  colour alone. Project health, task status, and membership status always have
+  a readable label.
+- The page background carries a single soft radial wash (dark green-grey,
+  centred high on the page, fading out by about 43% of the viewport). It is the
+  only decorative background in the product. Do not add gradients, patterns, or
+  imagery to other surfaces.
+- The brand mark is a 30 px rounded square (9 px radius) with a dark green
+  surface, a muted green border, and light green text. It is the only logo
+  treatment; do not restyle it per page.
+
+### 2.2 Typography
+
+- Font stack: the system stack (`-apple-system, BlinkMacSystemFont, "Segoe UI",
+  sans-serif`). No webfont is loaded, and no new font may be added without a
+  performance justification.
+- Headings use tight letter-spacing and a weight around 560–600; body text uses
+  regular weight with a line height around 1.7 for longer copy.
+- Scale (shipped, fluid where noted):
+  - Page/hero heading: fluid, roughly 42 px at small widths to 76 px at large
+    widths, line height about 1.03.
+  - Eyebrow label: 12 px, semibold, 0.12 em letter-spacing, uppercase, accent
+    colour. Used for the small label above a heading, not for body text.
+  - Body/intro copy: 16–18 px, muted, line height 1.7.
+  - Supporting text (status pills, meta, captions): 13 px.
+  - Brand wordmark: 16 px, semibold, −0.03 em letter-spacing.
+- Numbers that are metrics (progress, counts, workload) use the same font as
+  text; there is no separate display font for numbers.
+- Never use all-caps for body text, and never set text smaller than 12 px for
+  content a user must read to act.
+
+## 3. Spacing and layout system
+
+- The page shell is a full-height flex column, with padding that scales from
+  24 px on small screens to 64 px on large screens.
+- Content width is constrained by readability, not by the viewport: intro and
+  form content is capped at about 690 px and centred; headings are capped at
+  about 650 px; body copy at about 510 px.
+- Vertical rhythm: a section heading is followed by 20–25 px of space before
+  its copy; a status pill or primary action sits about 34 px below intro copy.
+- Cards and panels use the surface token, a 1 px border, and a radius that
+  matches the component family (9 px for small elements such as the brand
+  mark; larger radii only where an existing component already uses them).
+- Status pills are fully rounded (999 px radius), with a 1 px border, a
+  translucent surface, and a 7 px indicator dot. Do not invent a second pill
+  style.
+- Gaps inside a component are 10–13 px for inline elements (icon + label,
+  dot + text). Do not use a different gap for the same relationship on
+  different screens.
+
+## 4. Reusable components
+
+The following components already exist in `src/app/components/` and must be
+reused. A new screen that needs a component not listed here must first check
+whether an existing one can be extended.
+
+- **Auth page** (`auth-page.tsx`): the shared shell for register, login,
+  forgot-password, reset-password, verify-email, and resend-verification.
+  One form, one primary action, secondary links below, errors announced
+  inline. No auth screen may build its own shell.
+- **Workspace pages** (`workspace-pages.tsx`): organization list, organization
+  detail, and workspace navigation. The workspace is the unit of navigation;
+  every project screen hangs off a workspace.
+- **Organization pages** (`organization-page.tsx`, `organization-members-page.tsx`,
+  `organization-projects.tsx`): organization detail, member management, and
+  project listing within an organization.
+- **Project pages** (`project-page.tsx`, `project-tasks-page.tsx`,
+  `project-milestones-page.tsx`, `project-activity-page.tsx`,
+  `project-work-nav.tsx`): project overview (including calculated progress,
+  health, workload, activity, and deadlines), Kanban/list task board,
+  milestones, and activity feed, with shared project navigation.
+- **Organization search page** (`organization-search-page.tsx`): workspace
+  search results, with a pagination control rendered as a semantic `<nav>`
+  element.
+- **Notification centre** (`notification-center.tsx`): in-app notifications,
+  read/unread state, and preferences. The UI states plainly that email
+  delivery is not enabled yet; do not imply otherwise.
+- **Accept-invitation page** (`accept-invitation-page.tsx`): invitation
+  acceptance. The token is removed from the address bar and held in
+  tab-scoped session storage while the invitee signs in; the page never
+  displays the raw token.
+
+Component rules:
+
+- A component owns one screen or one panel, not a whole workflow.
+- Buttons and links inherit the surrounding font. A button never sets its own
+  font family or size unless the existing component already does.
+- Progress is shown with a semantic `<progress>` element, not a styled `<div>`
+  with an inline width. This is also a CSP rule: no inline styles for
+  progress bars.
+- Lists that paginate use the shared pagination pattern (semantic nav, same
+  class and label). Lists that do not paginate say so by their bounded size
+  (for example, at most six milestones on an overview, at most five recent
+  activity events, at most eight upcoming deadlines).
+- Dialogs, dropdowns, and menus, where they exist, follow the same surface,
+  border, and focus rules as the rest of the product. A dialog must trap
+  focus, close on Escape, and return focus to the element that opened it.
+
+## 5. Navigation and forms
+
+### 5.1 Navigation
+
+- Top level: the brand mark and wordmark, then workspace navigation. A user
+  with several organizations switches organization from the workspace, not
+  from a project screen.
+- Project navigation (`project-work-nav.tsx`) is shared across the project
+  overview, tasks, milestones, and activity screens. A project screen never
+  builds its own project nav.
+- Navigation labels are nouns and verbs the user already knows: Workspaces,
+  Projects, Milestones, Tasks, Activity, Search, Notifications. Do not rename
+  them per screen.
+- The current location is always visible in the navigation and in the page
+  heading. A user must never have to guess which organization or project a
+  screen belongs to.
+- Deep links go to the same screen a user would reach by navigating there;
+  a signed file-download link is the only exception, and it is time-limited
+  (five minutes) and bound to one user, tenant, task, file, and version.
+
+### 5.2 Forms
+
+- Every field has a visible, associated label. Placeholder text is never a
+  substitute for a label.
+- Validation is client-visible and server-enforced. The server is the
+  authority; client validation is a convenience, not a boundary.
+- Errors are shown inline, next to the field they belong to, in plain
+  language, and are announced to assistive technology. A form never shows a
+  generic "something went wrong" when a field-level message is possible.
+- A primary action is a single button. Secondary actions are links or
+  lower-emphasis buttons. A form never has two primary buttons.
+- A submitting form disables its submit button and shows a loading state;
+  it never allows a double submit to create a duplicate. Server-side
+  idempotency keys back the important mutations (see `API.md`).
+- Destructive actions (delete, remove a member, revoke an invitation) require
+  an explicit confirmation step and state exactly what will happen, including
+  what cannot be undone. Project deletion follows this pattern in a danger
+  zone on the project page, visible only to managers: an opener button
+  ("Delete project") reveals a confirmation panel (role `alertdialog`)
+  naming the project and stating that it hides immediately for everyone and
+  that its tasks, milestones, comments, files, and notifications are
+  permanently removed after 30 days while activity records are kept; the
+  confirm button ("Delete this project") is distinct from the opener, and
+  cancellation ("Keep project") leaves the project untouched.
+- File upload forms state the limits before upload: at most 10 MiB per file,
+  at most 20 active files per task, at most 100 MiB per task. A rejected file
+  says which rule it broke.
+
+## 6. Loading, empty, and error states
+
+Every data screen must define all four states before it ships. A screen that
+only handles the happy path is not finished.
+
+- **Loading:** a skeleton or a labelled loading indicator in place of the
+  content, with the page heading and navigation already visible. No spinner
+  that blocks the whole page, and no layout shift when content arrives.
+- **Empty:** a short sentence saying what would be here and the one action
+  that creates it, if the user is allowed to create it. Examples: a project
+  with no tasks, a search with no results, an organization with no projects.
+  An empty analytics panel says "no data", not 0%.
+- **Error:** a plain-language message, what the user can do (retry, check a
+  field, contact an administrator), and no database detail, stack trace, or
+  internal code. A 401 shows a sign-in prompt; a 403 shows a permission
+  message, not a sign-in prompt; a 409 (concurrent update) says the project
+  changed and asks the user to refresh and try again.
+- **Permission-denied:** a dedicated state, not a blank screen and not a
+  login redirect loop. It says the user does not have access to this
+  organization or project, and offers the workspace list as a way out.
+- **Route crash:** `src/app/error.tsx` is the route error boundary.
+  When a page throws during render, the user sees a generic message
+  with "Try again" (re-renders the route) and a link back to
+  workspaces. No error message, stack trace, or internal detail is
+  ever rendered; the real error is logged server-side. Build-verified
+  only — no crashing route exists to exercise it in a browser test.
+- **Offline / reconnecting (future, realtime):** when realtime arrives, a
+  disconnected client must show a reconnecting state and fall back to
+  refresh/polling. Until then, a failed fetch is an error state, not a silent
+  stale screen.
+
+## 7. Interactions and animations
+
+- **Kanban drag and drop:** dragging is available only in board view, only
+  when the user has work permission, only when the full list is shown (no
+  pagination remainder), and only when no filter is active. When dragging is
+  unavailable, a status control is the alternative; a user must never be
+  left with no way to change a status.
+- **Drag alternative:** every drag operation has a keyboard/screen-reader
+  alternative (the status control). Drag alone is never the only path.
+- **Optimistic updates:** only where safe. A status change may update
+  optimistically and roll back on a 409; a consequential creation (a project,
+  a member invitation, an AI-generated plan) never pretends to succeed before
+  the server confirms it.
+- **Motion:** transitions are short and purposeful (panel open/close, status
+  change, drag start). No page-load animation, no animated card hover, no
+  looping decoration. Reduced motion (`prefers-reduced-motion`) disables
+  non-essential motion entirely.
+- **Focus:** the visible focus ring is a 2 px accent outline with a 4 px
+  offset. It is never removed, and it is never replaced by a colour change
+  alone. Focus order follows the visual order, and focus is managed on
+  dialog open/close and after a destructive action completes.
+
+## 8. Responsive behaviour
+
+- **Desktop:** full workspace and project layouts, board and list views side
+  by side with their filters, and the full analytics overview.
+- **Tablet:** the same screens, with filters and navigation collapsing into
+  the shared patterns rather than a separate layout. The Kanban board scrolls
+  horizontally by column; it is never squeezed into unreadable columns.
+- **Mobile:** single-column layout, full-width forms and cards, and the
+  page-shell padding at its 24 px minimum. Kanban columns stack or scroll
+  horizontally; task cards show title, status, priority, assignee, and due
+  date, in that order. No feature is desktop-only except where a future
+  design document explicitly says so, and then the mobile alternative must
+  be named.
+- Breakpoints follow the shipped fluid rules (page padding and heading size
+  scale with the viewport) rather than a fixed set of pixel breakpoints in
+  this document. A new screen must use the same fluid approach.
+- Touch targets are at least 44 px in the dimension a user taps, and tap
+  targets never overlap.
+
+## 9. Accessibility requirements
+
+Accessibility is a release gate, not a note. A screen is not finished until
+each item below has been checked for that screen.
+
+- Keyboard navigation covers every action, including Kanban status changes,
+  pagination, dialogs, and notification actions. There is no mouse-only path.
+- Semantic HTML: `<nav>` for pagination and navigation, `<progress>` for
+  progress, real buttons for actions, real links for navigation, real labels
+  for fields. A `<div>` with a click handler is not a button.
+- Visible focus (section 7) on every interactive element, in the same style
+  everywhere.
+- Contrast: primary text on background and surface meets the usual AA bar;
+  muted text is used only for secondary content, never for a primary action
+  label or an error message.
+- Form errors are associated with their fields and announced; a form submit
+  that fails does not silently leave focus where it was.
+- Reduced motion is honoured (section 7).
+- Screen-reader text is present where an icon alone would otherwise carry
+  meaning (brand mark, status indicator dot, drag handle).
+- The product is dark-only, so contrast is judged against the dark tokens
+  in section 2, not against a light theme that does not exist.
+
+## 10. Page-level layout guidance
+
+- **Auth pages:** centred, capped-width form in the shared auth shell. One
+  heading, one form, one primary action, secondary links below. No sidebar,
+  no marketing copy, no decorative panel.
+- **Home / landing (signed out):** intro block (eyebrow, heading, copy,
+  status pill), centred, capped at 690 px. It states what Nexora is and
+  nothing it does not yet do.
+- **Workspace / organization list:** list of organizations with name,
+  membership, and a way into each workspace. Empty state: create an
+  organization.
+- **Organization detail:** organization name and members, project list, and
+  member management. Member rows show name, role, and status (including
+  disabled memberships, labelled as disabled).
+- **Project overview:** progress, health (with its reason), workload
+  (including unassigned tasks), milestone progress (at most six milestones),
+  recent activity (at most five events, trailing seven days), and upcoming
+  deadlines (at most eight). Every number is calculated from the database
+  and labelled as such; no AI insight is shown here.
+- **Task board / list:** columns or rows by workflow status, with filters,
+  sorting, and pagination on the list view, and safe bulk priority updates
+  where offered. Task cards show title, status, priority, assignee, labels,
+  due date, and subtask progress, in that order.
+- **Milestones:** milestone list with dates, status, linked-task progress,
+  and dependency information. A milestone with no linked active tasks shows
+  no percentage.
+- **Activity:** an audit-backed feed of meaningful events (task created,
+  assigned, status changed, comment added, member added, milestone
+  completed), most recent first, with actor and time.
+- **Search:** one search field, entity and project filters, bounded results
+  (default 20, at most 50 per page, offset at most 10,000), and a result that
+  shows only a title, a short preview, and an in-app destination. Member
+  results never show email addresses; file results never show file content
+  or storage keys.
+- **Notifications:** a centre listing in-app notifications with read/unread
+  state and preferences. It states that email delivery is not enabled yet.
+- **Settings:** organization settings and member roles are still future
+  work. Account security is built: the `/account` screen follows the
+  same form and confirmation rules as section 5, with a password-change
+  form and an active-sessions list (created, last seen, expiry, current
+  flag) that shows no invented device details, because the account
+  does not record them. Two rules govern its error and success
+  states: a wrong current password stays on the page with its error
+  (only a genuinely missing session redirects to sign-in), and a
+  successful revocation refreshes the session list before showing its
+  success message, so the refresh cannot erase the message. A settings
+  screen that does nothing must not be implied for the parts that are
+  still future.
+
+## 11. What not to do
+
+- Do not add a light theme, a second accent colour, a webfont, or a
+  decorative illustration without a documented decision.
+- Do not copy a generic SaaS dashboard template: no gradient hero, no
+  feature-card grid, no fake metrics, no testimonial block.
+- Do not use a component library's default styling. Nexora's components are
+  custom and token-driven; a library component, if ever adopted, must be
+  restyled to these tokens before it ships.
+- Do not animate for decoration, and do not add a loading spinner to a
+  screen that already has a skeleton pattern.
+- Do not show AI-generated content without labelling it as AI-generated, and
+  do not present an AI recommendation as a confirmed fact. (AI features do
+  not exist yet; this rule binds their future design.)

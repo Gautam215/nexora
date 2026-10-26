@@ -10,6 +10,36 @@ async function runMigrations() {
   const connectionString = process.env.MIGRATOR_DATABASE_URL;
   if (!connectionString) throw new Error("MIGRATOR_DATABASE_URL is required");
 
+  // The migrator holds a session-level advisory lock across many
+  // transactions, one per migration. That lock is unsupported in
+  // PgBouncer transaction pooling, so a pooled Neon endpoint
+  // (host containing "-pooler.") would silently lose the lock and let
+  // two migrators run at once. Fail fast and name the direct endpoint
+  // instead of risking that silent race. The app pool, which only uses
+  // transaction-local state, may still use the pooled endpoint.
+  try {
+    const url = new URL(connectionString);
+    if (url.hostname.includes("-pooler.")) {
+      throw new Error(
+        "MIGRATOR_DATABASE_URL must use the direct Neon endpoint, not the pooled (-pooler) endpoint: the migrator's session-level advisory lock is unsupported in transaction pooling.",
+      );
+    }
+    if (url.hostname.endsWith(".neon.tech") && !url.searchParams.has("sslmode")) {
+      throw new Error(
+        "MIGRATOR_DATABASE_URL for Neon must include sslmode=require.",
+      );
+    }
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      (error.message.startsWith("MIGRATOR_DATABASE_URL must") ||
+        error.message.startsWith("MIGRATOR_DATABASE_URL for Neon"))
+    ) {
+      throw error;
+    }
+    // An unparseable URL is pg's problem to report, not ours to mask.
+  }
+
   const migrationEntries = await readdir(migrationDirectory, { withFileTypes: true });
   const sqlNames = migrationEntries
     .filter((entry) => entry.isFile() && entry.name.endsWith(".sql"))
@@ -77,6 +107,20 @@ async function runMigrations() {
       }
       console.log(`Applied ${name}`);
     }
+
+    // Previously, runtime grants were a separate manual step
+    // (psql -f db/runtime-grants.sql), and skipping it broke every
+    // runtime query with "permission denied for schema nexora" even
+    // though all migrations had succeeded. Apply the grants here, as
+    // the migration owner, so a single `npm run db:migrate` leaves
+    // the database usable. The grants file is idempotent (REVOKE
+    // then GRANT), so re-running the migrator is safe.
+    const grantsSource = await readFile(
+      new URL("../db/runtime-grants.sql", import.meta.url),
+      "utf8",
+    );
+    await client.query(grantsSource);
+    console.log("Applied db/runtime-grants.sql");
   } finally {
     if (lockHeld) {
       await client.query("SELECT pg_catalog.pg_advisory_unlock($1)", [advisoryLockId]).catch(() => undefined);

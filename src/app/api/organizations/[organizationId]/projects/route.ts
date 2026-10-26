@@ -80,6 +80,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
              LIMIT 1
            ) AS owner ON true
            WHERE project.organization_id = $1
+             AND project.deleted_at IS NULL
            ORDER BY project.created_at DESC, project.id DESC
            LIMIT $3 OFFSET $4`,
           [organizationId, principal.userId, pagination.limit + 1, pagination.offset],

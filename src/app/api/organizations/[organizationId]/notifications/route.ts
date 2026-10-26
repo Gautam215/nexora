@@ -47,8 +47,12 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       async (transaction) => {
         const unread = await transaction.query<{ unread_count: number }>(
           `SELECT count(*)::integer AS unread_count
-           FROM nexora.notifications
-           WHERE organization_id = $1 AND recipient_user_id = $2 AND read_at IS NULL`,
+           FROM nexora.notifications AS notification
+           JOIN nexora.projects AS project
+             ON project.organization_id = notification.organization_id
+            AND project.id = notification.project_id
+            AND project.deleted_at IS NULL
+           WHERE notification.organization_id = $1 AND notification.recipient_user_id = $2 AND notification.read_at IS NULL`,
           [organizationId, principal.userId],
         );
         const rows = await transaction.query<NotificationRow>(
@@ -68,6 +72,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
            JOIN nexora.projects AS project
              ON project.organization_id = notification.organization_id
             AND project.id = notification.project_id
+            AND project.deleted_at IS NULL
            LEFT JOIN LATERAL (
              SELECT member.display_name
              FROM nexora.list_current_project_members(notification.organization_id, notification.project_id) AS member

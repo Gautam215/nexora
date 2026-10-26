@@ -40,6 +40,20 @@ export const resetPasswordSchema = z.strictObject({
   password,
 });
 
+// Logged-in password change. The current password uses the login
+// password shape (1–128) so that a legacy short password can still be
+// verified; the new password uses the full registration policy
+// (12–128), enforced here so that a policy failure is a 400, not a 500
+// from hashPassword.
+export const changePasswordSchema = z.strictObject({
+  currentPassword: loginPassword,
+  newPassword: password,
+});
+
+export const sessionRevokeSchema = z.strictObject({
+  sessionId: z.string().uuid(),
+});
+
 export const organizationCreateSchema = z.strictObject({
   name: z.string().trim().min(1).max(120),
   slug: z
@@ -50,6 +64,31 @@ export const organizationCreateSchema = z.strictObject({
     .max(63)
     .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
 });
+
+// Organization settings use the same name and slug rules as creation;
+// at least one field must be present, and only the provided fields change.
+export const organizationDeleteSchema = z.strictObject({
+  // Explicit confirmation: the caller must repeat the workspace's
+  // current slug. A mismatch is a conflict, not a validation failure,
+  // because the slug itself is well-formed but does not match.
+  slug: z.string().trim().toLowerCase().min(2).max(63).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+});
+
+export const organizationUpdateSchema = z
+  .strictObject({
+    name: z.string().trim().min(1).max(120).optional(),
+    slug: z
+      .string()
+      .trim()
+      .toLowerCase()
+      .min(2)
+      .max(63)
+      .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+      .optional(),
+  })
+  .refine((value) => value.name !== undefined || value.slug !== undefined, {
+    message: "At least one organization field must be changed.",
+  });
 
 export const organizationInvitationCreateSchema = z.strictObject({
   email,

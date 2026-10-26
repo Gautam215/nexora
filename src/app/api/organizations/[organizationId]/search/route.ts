@@ -37,6 +37,7 @@ const SEARCH_SOURCES: Record<SearchEntityType, string> = {
            NULL::text AS related_task_title
     FROM nexora.projects AS project
     WHERE project.organization_id = $1::uuid
+      AND project.deleted_at IS NULL
       AND ($3::uuid IS NULL OR project.id = $3)
       AND pg_catalog.to_tsvector(
         'simple'::pg_catalog.regconfig,
@@ -63,6 +64,7 @@ const SEARCH_SOURCES: Record<SearchEntityType, string> = {
      AND workflow.id = task.workflow_status_id
     WHERE task.organization_id = $1::uuid
       AND task.archived_at IS NULL
+      AND project.deleted_at IS NULL
       AND ($3::uuid IS NULL OR task.project_id = $3)
       AND pg_catalog.to_tsvector(
         'simple'::pg_catalog.regconfig,
@@ -89,6 +91,7 @@ const SEARCH_SOURCES: Record<SearchEntityType, string> = {
      AND project.id = task.project_id
     WHERE comment.organization_id = $1::uuid
       AND task.archived_at IS NULL
+      AND project.deleted_at IS NULL
       AND ($3::uuid IS NULL OR comment.project_id = $3)
       AND pg_catalog.to_tsvector(
         'simple'::pg_catalog.regconfig,
@@ -114,6 +117,13 @@ const SEARCH_SOURCES: Record<SearchEntityType, string> = {
            AND project_member.project_id = $3
           AND project_member.user_id = member.user_id
           AND project_member.status = 'active'
+          AND EXISTS (
+            SELECT 1
+            FROM nexora.projects AS filtered_project
+            WHERE filtered_project.organization_id = $1::uuid
+              AND filtered_project.id = $3
+              AND filtered_project.deleted_at IS NULL
+          )
       ))
       AND pg_catalog.to_tsvector(
         'simple'::pg_catalog.regconfig,
@@ -141,6 +151,7 @@ const SEARCH_SOURCES: Record<SearchEntityType, string> = {
     WHERE file.organization_id = $1::uuid
       AND file.deleted_at IS NULL
       AND task.archived_at IS NULL
+      AND project.deleted_at IS NULL
       AND ($3::uuid IS NULL OR file.project_id = $3)
       AND pg_catalog.to_tsvector(
         'simple'::pg_catalog.regconfig,

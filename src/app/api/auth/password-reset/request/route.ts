@@ -7,12 +7,15 @@ import {
   jsonError,
   jsonOk,
   jsonServerFailure,
-  logRouteFailure,
   parseJson,
 } from "../../../../../server/api.ts";
 import { isRateLimited } from "../../../../../server/auth-rate-limit.ts";
 import { issuePasswordReset } from "../../../../../server/db.ts";
-import { sendPasswordResetEmail, validateEmailDeliveryConfig } from "../../../../../server/email.ts";
+import {
+  sendPasswordResetEmail,
+  validateEmailDeliveryConfig,
+  verifyEmailDelivery,
+} from "../../../../../server/email.ts";
 
 export const runtime = "nodejs";
 
@@ -35,6 +38,7 @@ export async function POST(request: NextRequest) {
       );
     }
     validateEmailDeliveryConfig();
+    await verifyEmailDelivery();
 
     const token = createOpaqueToken();
     const tokenHash = hashOpaqueToken(token);
@@ -46,11 +50,12 @@ export async function POST(request: NextRequest) {
       new Date(Date.now() + 60 * 60 * 1000),
     );
     if (issued) {
-      try {
-        await sendPasswordResetEmail(email, token);
-      } catch (error) {
-        logRouteFailure(request, "auth.password-reset.email", error);
-      }
+      // No swallow here: a delivery failure must reach jsonServerFailure
+      // (503), not a 202 claiming instructions "will arrive". The verify
+      // above means this path is only reached for a transient failure
+      // after a successful verify, and an unissued (ineligible) address
+      // still receives the same 202 as before.
+      await sendPasswordResetEmail(email, token);
     }
     return jsonOk(
       request,

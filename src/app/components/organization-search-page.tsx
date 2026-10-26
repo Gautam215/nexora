@@ -193,7 +193,7 @@ export default function OrganizationSearchPage({ organizationId }: { organizatio
                   </a>
                 ))}
               </div>
-              <div className="search-pagination" aria-label="Search result pages">
+              <nav className="search-pagination" aria-label="Search result pages">
                 <button
                   className="quiet-button"
                   type="button"
@@ -211,7 +211,7 @@ export default function OrganizationSearchPage({ organizationId }: { organizatio
                 >
                   Next
                 </button>
-              </div>
+              </nav>
             </section>
           )}
         </div>

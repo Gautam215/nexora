@@ -3,9 +3,10 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server.js";
 import type { NextRequest } from "next/server";
 import type { ZodType } from "zod";
-import { OrganizationAccessDenied } from "./db.ts";
-import { EmailConfigurationError } from "./email.ts";
+import { OrganizationAccessDenied, OrganizationNotFound } from "./db.ts";
+import { EmailConfigurationError, EmailDeliveryError } from "./email.ts";
 import { RateLimitConfigurationError } from "../security/rate-limit.ts";
+import { recordOperationFailure, recordResponse } from "./metrics.ts";
 
 const MAX_JSON_BYTES = 16 * 1024;
 const REQUEST_ID_PATTERN = /^[A-Za-z0-9._:-]{1,80}$/;
@@ -29,6 +30,15 @@ function jsonResponse(
   const responseHeaders = new Headers(headers);
   responseHeaders.set("x-request-id", id);
   responseHeaders.set("cache-control", "no-store");
+  // Every JSON response is counted here, once, by normalized path and
+  // status class. Redirects (OAuth) bypass this helper and are not
+  // counted; see src/server/metrics.ts for the scope and limits.
+  try {
+    recordResponse(new URL(request.url).pathname, status);
+  } catch {
+    // Metrics must never break a response; a malformed request URL is
+    // already handled by the route itself.
+  }
   return NextResponse.json(payload(id), { status, headers: responseHeaders });
 }
 
@@ -71,6 +81,9 @@ export function logRouteFailure(
       : undefined;
   console.error(
     JSON.stringify({
+      timestamp: new Date().toISOString(),
+      severity: "error",
+      service: "nexora-api",
       event: "api.request_failed",
       operation,
       requestId: requestId(request),
@@ -85,6 +98,10 @@ export function jsonServerFailure(
   operation: string,
   error: unknown,
 ): NextResponse {
+  // Operation-level failure counts, in addition to the per-path counts
+  // recorded by jsonResponse via the jsonError calls below. Recorded
+  // once per failure, before any delegation.
+  recordOperationFailure(operation);
   if (
     typeof error === "object" &&
     error !== null &&
@@ -106,6 +123,14 @@ export function jsonServerFailure(
       "You do not have permission to manage this workspace.",
     );
   }
+  if (error instanceof OrganizationNotFound) {
+    return jsonError(
+      request,
+      404,
+      "ORGANIZATION_NOT_FOUND",
+      "Workspace not found.",
+    );
+  }
   if (
     error instanceof EmailConfigurationError ||
     error instanceof RateLimitConfigurationError
@@ -115,6 +140,18 @@ export function jsonServerFailure(
       503,
       "SERVICE_UNAVAILABLE",
       "Authentication is not configured yet. Contact the workspace administrator.",
+    );
+  }
+  if (error instanceof EmailDeliveryError) {
+    // Logged, unlike a configuration error, because a delivery failure
+    // is an operational incident an administrator must act on. The
+    // client message is generic: no SMTP host, reply, or exception.
+    logRouteFailure(request, operation, error);
+    return jsonError(
+      request,
+      503,
+      "EMAIL_DELIVERY_UNAVAILABLE",
+      "Email delivery is unavailable right now. Please try again later.",
     );
   }
   logRouteFailure(request, operation, error);
@@ -138,7 +175,19 @@ export function hasSameOrigin(request: NextRequest): boolean {
     const actual = new URL(requestOrigin);
     if (expected.pathname !== "/" || expected.search || expected.hash) return false;
     if (process.env.NODE_ENV === "production" && expected.protocol !== "https:") {
-      return false;
+      // Production still requires HTTPS, except for loopback origins.
+      // Loopback traffic never leaves the machine, and the web platform
+      // treats localhost as a potentially trustworthy (secure) origin,
+      // so requiring TLS there adds no security — it only breaks a
+      // production build run locally over HTTP, where every mutation
+      // was rejected with ORIGIN_REJECTED even though the request
+      // origin exactly matched APP_ORIGIN. A non-loopback HTTP origin
+      // is still rejected, and the final origin-equality check below
+      // still applies, so this cannot be used to attack a remote
+      // HTTPS deployment: the request origin must equal the loopback
+      // origin the deployment itself configured.
+      const loopback = new Set(["localhost", "127.0.0.1", "::1"]);
+      if (!loopback.has(expected.hostname)) return false;
     }
     return actual.origin === expected.origin;
   } catch {

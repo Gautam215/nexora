@@ -98,13 +98,15 @@ async function readMilestone(
          ON dependency.organization_id = edge.organization_id
         AND dependency.project_id = edge.project_id
         AND dependency.id = edge.depends_on_milestone_id
+        AND dependency.deleted_at IS NULL
        WHERE edge.organization_id = milestone.organization_id
          AND edge.project_id = milestone.project_id
          AND edge.milestone_id = milestone.id
      ) AS dependency_list ON true
      WHERE milestone.organization_id = $1
        AND milestone.project_id = $2
-       AND milestone.id = $3`,
+       AND milestone.id = $3
+       AND milestone.deleted_at IS NULL`,
     [organizationId, projectId, milestoneId],
   );
   return result.rows[0] ?? null;
@@ -128,7 +130,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
         const projectResult = await transaction.query<{ can_manage: boolean }>(
           `SELECT nexora.can_manage_current_project(organization_id, id) AS can_manage
            FROM nexora.projects
-           WHERE organization_id = $1 AND id = $2`,
+           WHERE organization_id = $1 AND id = $2 AND deleted_at IS NULL`,
           [organizationId, projectId],
         );
         if (!projectResult.rows[0]) return null;
@@ -183,11 +185,12 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
                ON dependency.organization_id = edge.organization_id
               AND dependency.project_id = edge.project_id
               AND dependency.id = edge.depends_on_milestone_id
+              AND dependency.deleted_at IS NULL
              WHERE edge.organization_id = milestone.organization_id
                AND edge.project_id = milestone.project_id
                AND edge.milestone_id = milestone.id
            ) AS dependency_list ON true
-           WHERE milestone.organization_id = $1 AND milestone.project_id = $2
+           WHERE milestone.organization_id = $1 AND milestone.project_id = $2 AND milestone.deleted_at IS NULL
            ORDER BY milestone.start_date NULLS LAST, milestone.end_date NULLS LAST, milestone.created_at, milestone.id`,
           [organizationId, projectId],
         );
@@ -248,7 +251,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
         const access = await transaction.query<{ can_manage: boolean }>(
           `SELECT nexora.can_manage_current_project(project.organization_id, project.id) AS can_manage
            FROM nexora.projects AS project
-           WHERE project.organization_id = $1 AND project.id = $2`,
+           WHERE project.organization_id = $1 AND project.id = $2 AND project.deleted_at IS NULL`,
           [organizationId, projectId],
         );
         if (!access.rows[0]) return { kind: "not_found" as const };
@@ -259,7 +262,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
                   project.status::text AS status,
                   nexora.can_manage_current_project(project.organization_id, project.id) AS can_manage
            FROM nexora.projects AS project
-           WHERE project.organization_id = $1 AND project.id = $2
+           WHERE project.organization_id = $1 AND project.id = $2 AND project.deleted_at IS NULL
            FOR UPDATE OF project`,
           [organizationId, projectId],
         );
@@ -304,7 +307,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
           const dependencyCount = await transaction.query<{ count: number }>(
             `SELECT count(*)::integer AS count
              FROM nexora.milestones
-             WHERE organization_id = $1 AND project_id = $2 AND id = ANY($3::uuid[])`,
+             WHERE organization_id = $1 AND project_id = $2 AND id = ANY($3::uuid[]) AND deleted_at IS NULL`,
             [organizationId, projectId, dependencyIds],
           );
           if (dependencyCount.rows[0]?.count !== dependencyIds.length) {

@@ -4,7 +4,10 @@ import {
   canTransitionMilestoneStatus,
   type MilestoneStatus,
 } from "../../../../../../../../security/milestone-status.ts";
-import { milestoneUpdateSchema } from "../../../../../../../../security/milestone-schemas.ts";
+import {
+  milestoneDeleteSchema,
+  milestoneUpdateSchema,
+} from "../../../../../../../../security/milestone-schemas.ts";
 import {
   hasSameOrigin,
   jsonError,
@@ -82,13 +85,15 @@ async function readMilestone(
          ON dependency.organization_id = edge.organization_id
         AND dependency.project_id = edge.project_id
         AND dependency.id = edge.depends_on_milestone_id
+        AND dependency.deleted_at IS NULL
        WHERE edge.organization_id = milestone.organization_id
          AND edge.project_id = milestone.project_id
          AND edge.milestone_id = milestone.id
      ) AS dependency_list ON true
      WHERE milestone.organization_id = $1
        AND milestone.project_id = $2
-       AND milestone.id = $3`,
+       AND milestone.id = $3
+       AND milestone.deleted_at IS NULL`,
     [organizationId, projectId, milestoneId],
   );
   return result.rows[0] ?? null;
@@ -151,7 +156,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
         const access = await transaction.query<{ can_manage: boolean }>(
           `SELECT nexora.can_manage_current_project(project.organization_id, project.id) AS can_manage
            FROM nexora.projects AS project
-           WHERE project.organization_id = $1 AND project.id = $2`,
+           WHERE project.organization_id = $1 AND project.id = $2 AND project.deleted_at IS NULL`,
           [organizationId, projectId],
         );
         if (!access.rows[0]) return { kind: "not_found" as const };
@@ -161,7 +166,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
           `SELECT project.status::text AS status,
                   nexora.can_manage_current_project(project.organization_id, project.id) AS can_manage
            FROM nexora.projects AS project
-           WHERE project.organization_id = $1 AND project.id = $2
+           WHERE project.organization_id = $1 AND project.id = $2 AND project.deleted_at IS NULL
            FOR UPDATE OF project`,
           [organizationId, projectId],
         );
@@ -182,7 +187,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
         }>(
           `SELECT id, name, description, start_date, end_date, status::text AS status, version
            FROM nexora.milestones
-           WHERE organization_id = $1 AND project_id = $2 AND id = $3
+           WHERE organization_id = $1 AND project_id = $2 AND id = $3 AND deleted_at IS NULL
            FOR UPDATE`,
           [organizationId, projectId, milestoneId],
         );
@@ -221,7 +226,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
           const available = await transaction.query<{ count: number }>(
             `SELECT count(*)::integer AS count
              FROM nexora.milestones
-             WHERE organization_id = $1 AND project_id = $2 AND id = ANY($3::uuid[])`,
+             WHERE organization_id = $1 AND project_id = $2 AND id = ANY($3::uuid[]) AND deleted_at IS NULL`,
             [organizationId, projectId, dependencyIds],
           );
           if (available.rows[0]?.count !== dependencyIds.length) {
@@ -250,7 +255,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
             `SELECT count(*)::integer AS count
              FROM nexora.milestones
              WHERE organization_id = $1 AND project_id = $2
-               AND id = ANY($3::uuid[]) AND status <> 'completed'`,
+               AND id = ANY($3::uuid[]) AND status <> 'completed' AND deleted_at IS NULL`,
             [organizationId, projectId, dependencyIds],
           );
           if (incomplete.rows[0]?.count) return { kind: "dependencies_incomplete" as const };
@@ -284,6 +289,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
                WHERE edge.organization_id = $1 AND edge.project_id = $2
                  AND edge.depends_on_milestone_id = $3
                  AND dependent.status = 'completed'
+                 AND dependent.deleted_at IS NULL
              ) AS exists`,
             [organizationId, projectId, milestoneId],
           );
@@ -410,4 +416,118 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
 
 function sameIds(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((id) => right.includes(id));
+}
+
+export async function DELETE(request: NextRequest, { params }: RouteContext) {
+  if (!hasSameOrigin(request)) {
+    return jsonError(request, 403, "ORIGIN_REJECTED", "This request was rejected.");
+  }
+  const parsed = await parseJson(request, milestoneDeleteSchema);
+  if (!parsed.ok) return jsonError(request, parsed.status, parsed.code, parsed.message);
+
+  try {
+    const principal = await getAuthPrincipal(request);
+    if (!principal) {
+      return jsonError(request, 401, "AUTHENTICATION_REQUIRED", "Sign in to continue.");
+    }
+    const { organizationId, projectId, milestoneId } = await params;
+    if (![projectId, milestoneId].every((value) => UUID_PATTERN.test(value))) {
+      return jsonError(request, 400, "INVALID_IDENTIFIER", "Project or milestone identifier is invalid.");
+    }
+    if (await isRateLimited(request, "project-management-user", principal.userId, 40, 3600, 80)) {
+      return jsonError(
+        request,
+        429,
+        "RATE_LIMITED",
+        "Too many project changes. Wait before trying again.",
+        { "retry-after": "3600" },
+      );
+    }
+
+    const auditId = randomUUID();
+    const result = await withOrganizationContext(
+      principal.userId,
+      organizationId,
+      async (transaction) => {
+        const access = await transaction.query<{ can_manage: boolean }>(
+          `SELECT nexora.can_manage_current_project(project.organization_id, project.id) AS can_manage
+           FROM nexora.projects AS project
+           WHERE project.organization_id = $1 AND project.id = $2 AND project.deleted_at IS NULL`,
+          [organizationId, projectId],
+        );
+        if (!access.rows[0]) return { kind: "not_found" as const };
+        if (!access.rows[0].can_manage) return { kind: "forbidden" as const };
+
+        const project = await transaction.query<{ status: string; can_manage: boolean }>(
+          `SELECT project.status::text AS status,
+                  nexora.can_manage_current_project(project.organization_id, project.id) AS can_manage
+           FROM nexora.projects AS project
+           WHERE project.organization_id = $1 AND project.id = $2 AND project.deleted_at IS NULL
+           FOR UPDATE OF project`,
+          [organizationId, projectId],
+        );
+        if (!project.rows[0]) return { kind: "not_found" as const };
+        if (!project.rows[0].can_manage) return { kind: "forbidden" as const };
+        if (["completed", "archived"].includes(project.rows[0].status)) {
+          return { kind: "project_closed" as const };
+        }
+
+        const currentResult = await transaction.query<{ version: number }>(
+          `SELECT version FROM nexora.milestones
+           WHERE organization_id = $1 AND project_id = $2 AND id = $3 AND deleted_at IS NULL
+           FOR UPDATE`,
+          [organizationId, projectId, milestoneId],
+        );
+        const current = currentResult.rows[0];
+        if (!current) return { kind: "not_found" as const };
+        if (current.version !== parsed.value.expectedVersion) {
+          return { kind: "conflict" as const };
+        }
+
+        const deleted = await transaction.query(
+          `UPDATE nexora.milestones
+           SET deleted_at = pg_catalog.now(),
+               deleted_by_user_id = $1
+           WHERE organization_id = $2 AND project_id = $3 AND id = $4 AND version = $5 AND deleted_at IS NULL
+           RETURNING id`,
+          [principal.userId, organizationId, projectId, milestoneId, current.version],
+        );
+        if (!deleted.rowCount) return { kind: "conflict" as const };
+
+        await transaction.query(
+          `INSERT INTO nexora.audit_events
+             (id, organization_id, actor_user_id, action, target_type, target_id, details)
+           VALUES ($1, $2, $3, 'milestone.deleted', 'milestone', $4, $5::jsonb)`,
+          [
+            auditId,
+            organizationId,
+            principal.userId,
+            milestoneId,
+            JSON.stringify({
+              previousVersion: current.version,
+              version: current.version + 1,
+            }),
+          ],
+        );
+        return { kind: "ok" as const };
+      },
+      "guest",
+    );
+
+    if (result.kind === "not_found") {
+      return jsonError(request, 404, "MILESTONE_NOT_FOUND", "Milestone not found.");
+    }
+    if (result.kind === "forbidden") {
+      return jsonError(request, 403, "PROJECT_MANAGEMENT_REQUIRED", "You do not have permission to manage milestones.");
+    }
+    if (result.kind === "project_closed") {
+      return jsonError(request, 409, "PROJECT_CLOSED", "Milestones cannot be changed in a completed or archived project.");
+    }
+    if (result.kind === "conflict") {
+      return jsonError(request, 409, "VERSION_CONFLICT", "This milestone changed elsewhere. Reload before saving again.");
+    }
+    return jsonOk(request, { milestoneId, deleted: true });
+  } catch (error) {
+    return jsonServerFailure(request, "milestones.delete", error);
+  }
 }

@@ -56,7 +56,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
       organizationId,
       async (transaction) => {
         const project = await transaction.query<{ id: string }>(
-          "SELECT id FROM nexora.projects WHERE organization_id = $1 AND id = $2",
+          "SELECT id FROM nexora.projects WHERE organization_id = $1 AND id = $2 AND deleted_at IS NULL",
           [organizationId, projectId],
         );
         if (!project.rows[0]) return { kind: "project_not_found" as const };

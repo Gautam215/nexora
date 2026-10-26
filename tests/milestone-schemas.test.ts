@@ -3,6 +3,7 @@ import test from "node:test";
 import { canTransitionMilestoneStatus } from "../src/security/milestone-status.ts";
 import {
   milestoneCreateSchema,
+  milestoneDeleteSchema,
   milestoneUpdateSchema,
 } from "../src/security/milestone-schemas.ts";
 
@@ -50,4 +51,12 @@ test("milestone transitions allow planned work to pause, complete, or reopen saf
   assert.equal(canTransitionMilestoneStatus("completed", "active"), true);
   assert.equal(canTransitionMilestoneStatus("completed", "on_hold"), false);
   assert.equal(canTransitionMilestoneStatus("active", "planned"), false);
+});
+
+test("milestone delete requires an optimistic version", () => {
+  assert.equal(milestoneDeleteSchema.safeParse({ expectedVersion: 3 }).success, true);
+  assert.equal(milestoneDeleteSchema.safeParse({}).success, false);
+  assert.equal(milestoneDeleteSchema.safeParse({ expectedVersion: 0 }).success, false);
+  assert.equal(milestoneDeleteSchema.safeParse({ expectedVersion: 1.5 }).success, false);
+  assert.equal(milestoneDeleteSchema.safeParse({ expectedVersion: 3, force: true }).success, false);
 });

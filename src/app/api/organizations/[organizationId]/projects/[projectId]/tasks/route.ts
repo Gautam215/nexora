@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { TASK_PRIORITIES } from "../../../../../../../security/task-schemas.ts";
-import { hasSameOrigin, jsonError, jsonOk, jsonServerFailure, parseJson } from "../../../../../../../server/api.ts";
+import { hasSameOrigin, jsonError, jsonOk, jsonServerFailure, logRouteFailure, parseJson } from "../../../../../../../server/api.ts";
+import { publishRealtimeEvent } from "../../../../../../../server/realtime/events.ts";
 import { getAuthPrincipal } from "../../../../../../../server/auth.ts";
 import { isRateLimited } from "../../../../../../../server/auth-rate-limit.ts";
 import { withOrganizationContext, type DatabaseTransaction } from "../../../../../../../server/db.ts";
@@ -81,7 +82,7 @@ async function readWorkAccess(
             nexora.can_work_current_project(project.organization_id, project.id) AS can_work,
             project.task_workflow_version AS workflow_version
      FROM nexora.projects AS project
-     WHERE project.organization_id = $1 AND project.id = $2`,
+     WHERE project.organization_id = $1 AND project.id = $2 AND project.deleted_at IS NULL`,
     [organizationId, projectId],
   );
   return result.rows[0] ?? null;
@@ -185,6 +186,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
              ON milestone.organization_id = task.organization_id
             AND milestone.project_id = task.project_id
             AND milestone.id = task.milestone_id
+            AND milestone.deleted_at IS NULL
            LEFT JOIN nexora.tasks AS parent
              ON parent.organization_id = task.organization_id
             AND parent.project_id = task.project_id
@@ -300,7 +302,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
           `SELECT project.status::text AS status,
                   nexora.can_work_current_project(project.organization_id, project.id) AS can_work
            FROM nexora.projects AS project
-           WHERE project.organization_id = $1 AND project.id = $2`,
+           WHERE project.organization_id = $1 AND project.id = $2 AND project.deleted_at IS NULL`,
           [organizationId, projectId],
         );
         if (!access.rows[0]) return { kind: "not_found" as const };
@@ -362,7 +364,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
         if (parsed.value.milestoneId) {
           const milestone = await transaction.query<{ status: string }>(
             `SELECT status::text AS status FROM nexora.milestones
-             WHERE organization_id = $1 AND project_id = $2 AND id = $3
+             WHERE organization_id = $1 AND project_id = $2 AND id = $3 AND deleted_at IS NULL
              FOR SHARE`,
             [organizationId, projectId, parsed.value.milestoneId],
           );
@@ -531,6 +533,22 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     if (result.kind === "dependency_archived") return jsonError(request, 409, "TASK_DEPENDENCY_ARCHIVED", "Archived tasks cannot be prerequisites.");
     if (result.kind === "dependencies_incomplete") return jsonError(request, 409, "TASK_DEPENDENCIES_INCOMPLETE", "Complete prerequisite tasks before placing this task in a completion column.");
     if (result.kind === "column_full") return jsonError(request, 409, "TASK_COLUMN_FULL", "This workflow column needs to be reordered before adding another task.");
+    if (result.kind === "created") {
+      // Published after the mutation transaction committed; a
+      // publish failure is logged, never substituted for the created
+      // task the caller already earned.
+      try {
+        await publishRealtimeEvent({
+          userId: principal.userId,
+          organizationId,
+          projectId,
+          type: "task.created",
+          data: { taskId: result.task.id, taskTitle: result.task.title },
+        });
+      } catch (publishError) {
+        logRouteFailure(request, "realtime.publish", publishError);
+      }
+    }
     return jsonOk(request, { task: result.task }, result.kind === "created" ? 201 : result.status);
   } catch (error) {
     return jsonServerFailure(request, "tasks.create", error);

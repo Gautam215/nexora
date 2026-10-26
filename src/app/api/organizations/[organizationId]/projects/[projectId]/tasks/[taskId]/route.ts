@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { taskArchiveSchema, taskUpdateSchema } from "../../../../../../../../security/task-schemas.ts";
-import { hasSameOrigin, jsonError, jsonOk, jsonServerFailure, parseJson } from "../../../../../../../../server/api.ts";
+import { hasSameOrigin, jsonError, jsonOk, jsonServerFailure, logRouteFailure, parseJson } from "../../../../../../../../server/api.ts";
+import { publishRealtimeEvent } from "../../../../../../../../server/realtime/events.ts";
 import { getAuthPrincipal } from "../../../../../../../../server/auth.ts";
 import { isRateLimited } from "../../../../../../../../server/auth-rate-limit.ts";
 import { withOrganizationContext, type DatabaseTransaction } from "../../../../../../../../server/db.ts";
@@ -45,7 +46,7 @@ async function readWorkAccess(
     `SELECT project.status::text AS status,
             nexora.can_work_current_project(project.organization_id, project.id) AS can_work
      FROM nexora.projects AS project
-     WHERE project.organization_id = $1 AND project.id = $2`,
+     WHERE project.organization_id = $1 AND project.id = $2 AND project.deleted_at IS NULL`,
     [organizationId, projectId],
   );
   return result.rows[0] ?? null;
@@ -84,6 +85,7 @@ async function readCurrentTask(
        ON milestone.organization_id = task.organization_id
       AND milestone.project_id = task.project_id
       AND milestone.id = task.milestone_id
+      AND milestone.deleted_at IS NULL
      WHERE task.organization_id = $1 AND task.project_id = $2 AND task.id = $3
      ${lock ? "FOR UPDATE OF task" : ""}`,
     [organizationId, projectId, taskId],
@@ -253,6 +255,17 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
           if (milestones.rows.some((milestone) => milestone.status === "completed")) {
             return { kind: "milestone_closed" as const };
           }
+        }
+
+        // A task already linked to a soft-deleted milestone stays
+        // editable, but it cannot be (re)assigned to a deleted one.
+        if (milestoneId && milestoneId !== current.milestone_id) {
+          const target = await transaction.query<{ id: string }>(
+            `SELECT id FROM nexora.milestones
+             WHERE organization_id = $1 AND project_id = $2 AND id = $3 AND deleted_at IS NULL`,
+            [organizationId, projectId, milestoneId],
+          );
+          if (!target.rows[0]) return { kind: "milestone_not_found" as const };
         }
 
         if (parentTaskId) {
@@ -552,6 +565,17 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
     if (result.kind === "dependencies_incomplete") return jsonError(request, 409, "TASK_DEPENDENCIES_INCOMPLETE", "Complete prerequisite tasks before placing this task in a completion column.");
     if (result.kind === "subtasks_incomplete") return jsonError(request, 409, "TASK_SUBTASKS_INCOMPLETE", "Complete every active subtask before completing this task.");
     if (result.kind === "completed_dependent") return jsonError(request, 409, "TASK_HAS_COMPLETED_DEPENDENTS", "Reopen dependent tasks before reopening this task.");
+    try {
+      await publishRealtimeEvent({
+        userId: principal.userId,
+        organizationId,
+        projectId,
+        type: "task.updated",
+        data: { taskId: result.task.id, taskTitle: result.task.title },
+      });
+    } catch (publishError) {
+      logRouteFailure(request, "realtime.publish", publishError);
+    }
     return jsonOk(request, { task: result.task });
   } catch (error) {
     return jsonServerFailure(request, "tasks.update", error);
@@ -658,6 +682,19 @@ export async function DELETE(request: NextRequest, { params }: RouteContext) {
     if (result.kind === "milestone_closed") return jsonError(request, 409, "MILESTONE_CLOSED", "Tasks in a completed milestone cannot be changed.");
     if (result.kind === "active_children") return jsonError(request, 409, "TASK_HAS_ACTIVE_SUBTASKS", "Archive subtasks before archiving their parent task.");
     if (result.kind === "active_dependents") return jsonError(request, 409, "TASK_HAS_ACTIVE_DEPENDENTS", "Reassign or complete dependent tasks before archiving this task.");
+    // Archiving is this codebase's task deletion (see
+    // src/server/realtime/events.ts).
+    try {
+      await publishRealtimeEvent({
+        userId: principal.userId,
+        organizationId,
+        projectId,
+        type: "task.deleted",
+        data: { taskId: result.task.id, taskTitle: result.task.title },
+      });
+    } catch (publishError) {
+      logRouteFailure(request, "realtime.publish", publishError);
+    }
     return jsonOk(request, { task: result.task });
   } catch (error) {
     return jsonServerFailure(request, "tasks.archive", error);

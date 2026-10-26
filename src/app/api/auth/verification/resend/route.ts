@@ -7,12 +7,15 @@ import {
   jsonError,
   jsonOk,
   jsonServerFailure,
-  logRouteFailure,
   parseJson,
 } from "../../../../../server/api.ts";
 import { isRateLimited } from "../../../../../server/auth-rate-limit.ts";
 import { issueEmailVerification } from "../../../../../server/db.ts";
-import { sendVerificationEmail, validateEmailDeliveryConfig } from "../../../../../server/email.ts";
+import {
+  sendVerificationEmail,
+  validateEmailDeliveryConfig,
+  verifyEmailDelivery,
+} from "../../../../../server/email.ts";
 
 export const runtime = "nodejs";
 
@@ -35,6 +38,7 @@ export async function POST(request: NextRequest) {
       );
     }
     validateEmailDeliveryConfig();
+    await verifyEmailDelivery();
 
     const token = createOpaqueToken();
     const tokenHash = hashOpaqueToken(token);
@@ -46,11 +50,10 @@ export async function POST(request: NextRequest) {
       new Date(Date.now() + 2 * 60 * 60 * 1000),
     );
     if (issued) {
-      try {
-        await sendVerificationEmail(email, token);
-      } catch (error) {
-        logRouteFailure(request, "auth.verification.email", error);
-      }
+      // No swallow here: see the password-reset route for why a delivery
+      // failure must surface as 503 instead of a 202 claiming a link
+      // "will arrive".
+      await sendVerificationEmail(email, token);
     }
     return jsonOk(
       request,

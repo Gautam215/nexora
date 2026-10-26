@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { taskCommentCreateSchema } from "../../../../../../../../../security/comment-schemas.ts";
-import { hasSameOrigin, jsonError, jsonOk, jsonServerFailure, parseJson } from "../../../../../../../../../server/api.ts";
+import { hasSameOrigin, jsonError, jsonOk, jsonServerFailure, logRouteFailure, parseJson } from "../../../../../../../../../server/api.ts";
+import { publishRealtimeEvent } from "../../../../../../../../../server/realtime/events.ts";
 import { getAuthPrincipal } from "../../../../../../../../../server/auth.ts";
 import { isRateLimited } from "../../../../../../../../../server/auth-rate-limit.ts";
 import { withOrganizationContext } from "../../../../../../../../../server/db.ts";
@@ -57,7 +58,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
         const project = await transaction.query<{ can_access: boolean }>(
           `SELECT nexora.can_access_current_project(project.organization_id, project.id) AS can_access
            FROM nexora.projects AS project
-           WHERE project.organization_id = $1 AND project.id = $2`,
+           WHERE project.organization_id = $1 AND project.id = $2 AND project.deleted_at IS NULL`,
           [organizationId, projectId],
         );
         if (!project.rows[0]?.can_access) return null;
@@ -167,7 +168,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
           `SELECT project.status::text AS status,
                   nexora.can_work_current_project(project.organization_id, project.id) AS can_work
            FROM nexora.projects AS project
-           WHERE project.organization_id = $1 AND project.id = $2`,
+           WHERE project.organization_id = $1 AND project.id = $2 AND project.deleted_at IS NULL`,
           [organizationId, projectId],
         );
         if (!project.rows[0]) return { kind: "not_found" as const };
@@ -322,6 +323,19 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     if (result.kind === "task_archived") return jsonError(request, 409, "TASK_ARCHIVED", "Comments cannot be added to an archived task.");
     if (result.kind === "milestone_closed") return jsonError(request, 409, "MILESTONE_CLOSED", "Comments cannot be added to a task in a completed milestone.");
     if (result.kind === "mention_not_available") return jsonError(request, 409, "COMMENT_MENTION_NOT_AVAILABLE", "Mentions must refer to active members of this project.");
+    if (result.kind === "created") {
+      try {
+        await publishRealtimeEvent({
+          userId: principal.userId,
+          organizationId,
+          projectId,
+          type: "comment.created",
+          data: { commentId: result.comment.id, taskId },
+        });
+      } catch (publishError) {
+        logRouteFailure(request, "realtime.publish", publishError);
+      }
+    }
     return jsonOk(request, { comment: result.comment }, result.kind === "created" ? 201 : result.status);
   } catch (error) {
     return jsonServerFailure(request, "task-comments.create", error);

@@ -21,6 +21,21 @@ export async function isRateLimited(
   return !emailAllowed || !ipAllowed;
 }
 
+/**
+ * IP-only rate limit for endpoints with no user-typed subject yet
+ * (OAuth start/callback). Same mechanism, same trusted-IP-header rule,
+ * and the same development bypass as the IP half of isRateLimited;
+ * it does not bypass any existing protection.
+ */
+export async function isIpRateLimited(
+  request: NextRequest,
+  scope: string,
+  ipLimit: number,
+  windowSeconds: number,
+): Promise<boolean> {
+  return !(await consumeIpLimit(request, scope, ipLimit, windowSeconds));
+}
+
 export async function isTokenRateLimited(
   request: NextRequest,
   scope: string,

@@ -33,6 +33,10 @@ export const projectUpdateSchema = z.strictObject({
   { message: "At least one project field must be changed." },
 );
 
+export const projectDeleteSchema = z.strictObject({
+  expectedVersion: z.number().int().min(1).max(2_147_483_646),
+});
+
 export const projectMemberCreateSchema = z.strictObject({
   userId,
   role: z.enum(["manager", "member", "viewer"]),

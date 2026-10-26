@@ -29,6 +29,31 @@ test("mutation origin check rejects cross-site and untrusted origins", () => {
   assert.equal(hasSameOrigin(unmarked), false);
 });
 
+test("mutation origin check allows loopback HTTP in production but not remote HTTP", () => {
+  runtimeEnvironment.NODE_ENV = "production";
+
+  const loopbackOrigin = "http://localhost:3100";
+  process.env.APP_ORIGIN = loopbackOrigin;
+  const loopbackSame = new NextRequest(`${loopbackOrigin}/api/auth/login`, {
+    method: "POST",
+    headers: { origin: loopbackOrigin, "sec-fetch-site": "same-origin" },
+  });
+  const loopbackMismatch = new NextRequest(`${loopbackOrigin}/api/auth/login`, {
+    method: "POST",
+    headers: { origin: "http://localhost:9999", "sec-fetch-site": "same-origin" },
+  });
+  assert.equal(hasSameOrigin(loopbackSame), true);
+  assert.equal(hasSameOrigin(loopbackMismatch), false);
+
+  const remoteOrigin = "http://nexora.example.test";
+  process.env.APP_ORIGIN = remoteOrigin;
+  const remoteHttp = new NextRequest(`${remoteOrigin}/api/auth/login`, {
+    method: "POST",
+    headers: { origin: remoteOrigin, "sec-fetch-site": "same-origin" },
+  });
+  assert.equal(hasSameOrigin(remoteHttp), false);
+});
+
 test("request parser bounds JSON, validates its media type, and reports safe errors", async () => {
   runtimeEnvironment.NODE_ENV = "test";
   const valid = new NextRequest(`${origin}/api`, {
@@ -85,4 +110,47 @@ test("serialization conflicts return a safe conflict response", async () => {
   assert.equal(response.status, 409);
   assert.equal(body.error.code, "CONCURRENT_UPDATE");
   assert.doesNotMatch(body.error.message, /database detail/);
+});
+
+test("failure logs carry timestamp, severity, and service fields", async () => {
+  const originalError = console.error;
+  const lines: string[] = [];
+  console.error = (...args: unknown[]) => {
+    lines.push(args.map(String).join(" "));
+  };
+  try {
+    const request = new NextRequest(`${origin}/api`, {
+      headers: { "x-request-id": "test-request-log-01" },
+    });
+    const response = jsonServerFailure(request, "test.log-shape", new Error("boom"));
+    assert.equal(response.status, 500);
+    const dbRequest = new NextRequest(`${origin}/api`, {
+      headers: { "x-request-id": "test-request-log-02" },
+    });
+    const dbResponse = jsonServerFailure(dbRequest, "test.log-shape", {
+      code: "23505",
+      message: "duplicate key",
+    });
+    assert.equal(dbResponse.status, 500);
+  } finally {
+    console.error = originalError;
+  }
+
+  assert.equal(lines.length, 2);
+  const first = JSON.parse(lines[0] as string) as Record<string, unknown>;
+  assert.equal(first.event, "api.request_failed");
+  assert.equal(first.operation, "test.log-shape");
+  assert.equal(first.requestId, "test-request-log-01");
+  assert.equal(first.errorName, "Error");
+  assert.equal(first.severity, "error");
+  assert.equal(first.service, "nexora-api");
+  assert.match(
+    String(first.timestamp),
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+  );
+  assert.equal(Number.isNaN(Date.parse(String(first.timestamp))), false);
+  assert.equal("errorCode" in first, false);
+  const second = JSON.parse(lines[1] as string) as Record<string, unknown>;
+  assert.equal(second.errorCode, "23505");
+  assert.equal(second.requestId, "test-request-log-02");
 });

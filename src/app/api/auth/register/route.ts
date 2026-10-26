@@ -7,12 +7,15 @@ import {
   jsonError,
   jsonOk,
   jsonServerFailure,
-  logRouteFailure,
   parseJson,
 } from "../../../../server/api.ts";
 import { isRateLimited } from "../../../../server/auth-rate-limit.ts";
 import { withUserContext } from "../../../../server/db.ts";
-import { sendVerificationEmail, validateEmailDeliveryConfig } from "../../../../server/email.ts";
+import {
+  sendVerificationEmail,
+  validateEmailDeliveryConfig,
+  verifyEmailDelivery,
+} from "../../../../server/email.ts";
 import { hashPassword } from "../../../../security/password.ts";
 
 export const runtime = "nodejs";
@@ -47,6 +50,7 @@ export async function POST(request: NextRequest) {
       );
     }
     validateEmailDeliveryConfig();
+    await verifyEmailDelivery();
 
     const userId = randomUUID();
     const token = createOpaqueToken();
@@ -79,11 +83,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    try {
-      await sendVerificationEmail(email, token);
-    } catch (error) {
-      logRouteFailure(request, "auth.register.email", error);
-    }
+    // No swallow here: a delivery failure must reach jsonServerFailure,
+    // which maps it to 503, instead of this route returning 202 with a
+    // message claiming a link "will arrive" that never will.
+    await sendVerificationEmail(email, token);
     return jsonOk(
       request,
       { message: "If the address is eligible, a confirmation link will arrive by email." },

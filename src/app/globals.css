@@ -236,6 +236,144 @@ h1 {
   width: min(100%, 610px);
 }
 
+.account-card {
+  width: min(100%, 690px);
+}
+
+.account-section {
+  margin-top: 34px;
+  padding-top: 28px;
+  border-top: 1px solid #303735;
+}
+
+.account-section h3 {
+  margin: 0 0 8px;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.account-section-copy {
+  margin: 0 0 19px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.session-list {
+  display: grid;
+  gap: 13px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: rgb(25 28 31 / 72%);
+}
+
+.session-details {
+  min-width: 0;
+  flex: 1 1 280px;
+}
+
+.session-details strong {
+  font-size: 14px;
+}
+
+.current-pill {
+  display: inline-block;
+  margin-left: 9px;
+  padding: 2px 8px;
+  border: 1px solid #4b5850;
+  border-radius: 999px;
+  background: #202722;
+  color: #d3e5d8;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.session-meta {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0 0;
+}
+
+.session-meta div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.session-meta dt {
+  min-width: 64px;
+  font-weight: 600;
+}
+
+.session-meta dd {
+  margin: 0;
+  color: #d0d4d6;
+}
+
+.confirm-panel {
+  width: 100%;
+  padding: 13px 14px;
+  border: 1px solid #3a4240;
+  border-radius: 10px;
+  background: #131615;
+}
+
+.confirm-panel p {
+  margin: 0 0 12px;
+  color: #d0d4d6;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 18px;
+}
+
+.danger-button {
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid #f0a8a0;
+  border-radius: 8px;
+  background: transparent;
+  color: #f0a8a0;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.danger-button:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
+.revoke-others {
+  margin-top: 19px;
+}
+
+.workspace-topline-actions {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
 .auth-kicker {
   color: #a9c2b0;
   font-size: 11px;
