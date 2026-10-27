@@ -48,9 +48,10 @@ function apiRequest(
   });
 }
 
-function cronRequest(job: string, token?: string): NextRequest {
+function cronRequest(job: string, token?: string, authorization?: string): NextRequest {
   const headers = new Headers();
   if (token !== undefined) headers.set("x-nexora-cron-token", token);
+  if (authorization !== undefined) headers.set("authorization", authorization);
   return new NextRequest(`${origin}/api/cron/${job}`, { method: "GET", headers });
 }
 
@@ -76,10 +77,27 @@ test(
       params: Promise.resolve({ job: "due-date" }),
     });
     assert.equal(wrong.status, 401);
+    const wrongBearer = await runCron(
+      cronRequest("due-date", undefined, "Bearer wrong-token"),
+      { params: Promise.resolve({ job: "due-date" }) },
+    );
+    assert.equal(wrongBearer.status, 401);
     const unknown = await runCron(cronRequest("nope", process.env.NEXORA_CRON_TOKEN), {
       params: Promise.resolve({ job: "nope" }),
     });
     assert.equal(unknown.status, 404);
+  },
+);
+
+test(
+  "cron route accepts the Vercel Bearer form of the same token",
+  { skip: !connectionString },
+  async () => {
+    const bearer = await runCron(
+      cronRequest("alerts", undefined, `Bearer ${process.env.NEXORA_CRON_TOKEN}`),
+      { params: Promise.resolve({ job: "alerts" }) },
+    );
+    assert.equal(bearer.status, 200);
   },
 );
 

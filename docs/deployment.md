@@ -134,21 +134,32 @@ of repeating work, and a failed run can be retried the same day
   monitor there, and the database-down rule works on every
   instance.
 
-Production steps (the repository schedules nothing by itself —
-do not add a `vercel.json` crons block without deciding the
-schedule below, because deploying one starts the schedule):
+Production schedule (shipped in `vercel.json`, UTC):
+`due-date` daily 02:00, `cleanup` daily 03:00, `email-outbox`
+daily 04:00, `alerts` daily 05:00. All four are daily-only on
+purpose: Vercel's Hobby plan rejects any cron expression that
+runs more than once per day at deploy time, so the tighter
+cadences the jobs were designed for (`email-outbox` every
+minute, `alerts` every 10 minutes) are NOT in `vercel.json`.
+To run those cadences, either upgrade the project to Pro
+(then tighten the two schedules in `vercel.json` and redeploy)
+or point a header-capable external scheduler at the same
+routes with the `x-nexora-cron-token` header — no code change
+needed for the external path. Vercel Cron timing on Hobby is
+guaranteed only within the hour, and every schedule change
+needs a redeploy.
+
+Production steps:
 1. Set `NEXORA_CRON_TOKEN` (long random value, distinct from
    `NEXORA_METRICS_TOKEN`) in Production and redeploy.
-2. Add the schedule in the scheduler of choice. Example Vercel
-   Cron paths (a `vercel.json` snippet to add deliberately, not
-   shipped by default): `due-date` daily, `cleanup` daily
-   off-peak, `email-outbox` every minute, `alerts` every 10
-   minutes — each as a GET to `/api/cron/<job>` with the cron
-   token header (Vercel Cron sends no custom header by default,
-   so if the scheduler cannot send headers, call the route from
-   a small scheduled caller that can, or use the operator scripts
-   in §6b instead; never remove the token to make scheduling
-   easier).
+2. Set `CRON_SECRET` in Production to the SAME value as
+   `NEXORA_CRON_TOKEN` and redeploy. Vercel Cron sends
+   `Authorization: Bearer <CRON_SECRET>` with every cron call,
+   and the route accepts that Bearer form as the same token
+   (the `x-nexora-cron-token` header still works for manual
+   and external callers). Never remove the token, and never set
+   either variable to a value the other does not share, or
+   Vercel Cron calls will 401.
 3. Check the first run of each job in `scheduled_job_runs`
    (status `ok` and its detail) before relying on it.
 

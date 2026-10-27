@@ -315,7 +315,7 @@ Base path:
 
 | Method and path | Purpose | Auth |
 | --- | --- | --- |
-| GET `/api/cron/{job}` | Run one scheduled job: `due-date` (reminders for tasks due tomorrow), `cleanup` (expired-record purge + file-object removal), `email-outbox` (one notification-email worker batch), `alerts` (metrics alerting on the SMTP path). A second call the same day replays the first run's result; a failed run can be retried the same day. | `x-nexora-cron-token` header, `NEXORA_CRON_TOKEN` env; unset token → 503, wrong token → 401, unknown job → 404. The origin check does not apply (cron callers are not browsers). |
+| GET `/api/cron/{job}` | Run one scheduled job: `due-date` (reminders for tasks due tomorrow), `cleanup` (expired-record purge + file-object removal), `email-outbox` (one notification-email worker batch), `alerts` (metrics alerting on the SMTP path). A second call the same day replays the first run's result; a failed run can be retried the same day. | `x-nexora-cron-token` header OR `Authorization: Bearer` with the same token (the form Vercel Cron sends when `CRON_SECRET` equals `NEXORA_CRON_TOKEN`); `NEXORA_CRON_TOKEN` env; unset token → 503, wrong token → 401, unknown job → 404. The origin check does not apply (cron callers are not browsers). Schedule lives in `vercel.json` (daily on Hobby; see `docs/deployment.md` §6a). |
 
 Alerts: server-error total crossing a new multiple of
 `NEXORA_ALERT_SERVER_ERROR_THRESHOLD` (default 10) since the last
@@ -371,6 +371,7 @@ signature. No webhook may trust a caller-supplied tenant, role, or user ID.
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_REQUIRE_TLS`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Outbound email. `SMTP_PASSWORD` is a secret and is never logged. |
 | `NEXORA_TRUSTED_CLIENT_IP_HEADER` | Production trusted-ingress IP header. Blank in local development. |
 | `NEXORA_CRON_TOKEN` | Long random value for `GET /api/cron/{job}`. Blank means every cron call fails closed with 503. |
+| `CRON_SECRET` | Must equal `NEXORA_CRON_TOKEN`. Vercel Cron sends it as `Authorization: Bearer <CRON_SECRET>`; a mismatch makes every Vercel Cron call 401. |
 | `NEXORA_ALERT_EMAIL`, `NEXORA_ALERT_SERVER_ERROR_THRESHOLD` | Alert recipient (blank = disabled) and server-error threshold (default 10). |
 | `NEXORA_DEFAULT_STORAGE_QUOTA_BYTES` | Opt-in default quota for organizations with no explicit quota. Blank = no cap. |
 
