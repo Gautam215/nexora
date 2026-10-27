@@ -305,7 +305,19 @@ $do$;
 -- Lifecycle functions from original 0012, exactly as written there.
 -- CREATE OR REPLACE is safe on a fresh database, where they already
 -- exist with the same definitions.
-CREATE FUNCTION nexora.purge_expired_task_files()
+--
+-- CORRECTION 2026-10-27 (user-authorized, see note below): these two
+-- functions were originally plain CREATE FUNCTION, which aborts a
+-- fresh-database migrate because original 0012 already created them.
+-- Changing them to CREATE OR REPLACE is definition-identical (same
+-- bodies as 0012 and as previously applied on production), so it
+-- changes no database state — but it DOES change this file's
+-- checksum. Production's recorded 0048 checksum must therefore be
+-- updated to the new value (see DATABASE.md) before any future
+-- migrator run against production, or the migrator will report
+-- "Applied migration changed" and refuse to run. The live app itself
+-- does not run migrations at startup and is unaffected.
+CREATE OR REPLACE FUNCTION nexora.purge_expired_task_files()
 RETURNS TABLE(storage_key uuid)
 LANGUAGE sql
 SECURITY DEFINER
@@ -316,7 +328,7 @@ AS $function$
   RETURNING file.storage_key
 $function$;
 
-CREATE FUNCTION nexora.list_unreferenced_task_file_keys(candidate_keys uuid[])
+CREATE OR REPLACE FUNCTION nexora.list_unreferenced_task_file_keys(candidate_keys uuid[])
 RETURNS TABLE(storage_key uuid)
 LANGUAGE plpgsql
 SECURITY DEFINER

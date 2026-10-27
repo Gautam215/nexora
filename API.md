@@ -94,6 +94,23 @@ error name, validated database code).
   when they are built; today, only the four creation paths above are
   covered, and the gap is recorded in the implementation plan.
 
+### 1.7 API evolution
+
+- Changes to this API are backward-compatible by default: additive
+  fields, new optional query parameters, and new routes do not break
+  existing clients. A change that removes or renames a field, changes
+  a response shape, or tightens validation so previously accepted
+  requests fail is a breaking change.
+- A breaking change is never shipped silently. It requires a new
+  versioned route (the old route keeps serving), a dated deprecation
+  notice in this document naming the old route and its removal date,
+  and a removal only after that date has passed. No client is broken
+  without a documented migration path.
+- This policy is a documentation commitment, not a versioning
+  implementation: no versioned routes exist yet, because no breaking
+  change has been made. When the first one is needed, the versioned
+  route and its deprecation notice ship in the same change.
+
 ## 2. Endpoints
 
 Methods and purposes are listed; request and response shapes follow the
@@ -144,8 +161,8 @@ exist.
 **Session rotation on privilege change (approved default, 2026-10-26, migration 0039).** No periodic rotation. PATCH on an organization member revokes all of that member's sessions (count in `sessionsRevoked`, also in the `membership.updated` audit details) when the new status is not active or the new role ranks below the previous role (owner > admin > member > guest); promotion and re-enable do not revoke. PATCH on a project member revokes only when the new status is not active; a project role-only change does not revoke, because project authorization is re-checked on every request. Password change revokes all other sessions and keeps the current session; password reset revokes all sessions.
 | POST `/api/auth/verification/consume` | Consume a single-use verification token. | None (token) |
 | POST `/api/auth/verification/resend` (resend-verification page route) | Re-issue a verification link. Non-enumerating response. | None |
-| POST `/api/auth/password-reset` (request) | Issue a single-use reset token. Non-enumerating response. | None |
-| POST `/api/auth/password-reset/consume` (or the shipped reset route) | Consume a reset token and set a new password. | None (token) |
+| POST `/api/auth/password-reset/request` | Issue a single-use reset token. Non-enumerating response. | None |
+| POST `/api/auth/password-reset/complete` | Consume a reset token and set a new password (12–128 policy); revokes all sessions. | None (token) |
 
 Authentication is email + password only (see 2.2a for the removed
 Google OAuth). Logged-in password change, active-session listing,
@@ -174,6 +191,12 @@ OAuth endpoints exist anymore; requests to the old paths 404.
 | PATCH `/api/organizations/{organizationId}` | Update organization name and/or slug, with the same validation as creation, and optionally `storageQuotaBytes` (positive integer up to 1 TiB, or `null` to clear the quota). Slug conflicts return 409 `SLUG_TAKEN`; a change writes an `organization.updated` audit record with previous and new values. A save with no changes succeeds and writes no audit row. Rate-limited (40 per user per hour, 80 per IP per hour, scope `organization-settings-user`). The response includes `storage_quota_bytes` and `storage_usage_bytes` (active file bytes across the workspace); GET returns the same two fields. NULL quota means no organization cap — per-task caps (20 files, 100 MB) still apply. Uploads and replacements over the quota return 409 `ORGANIZATION_STORAGE_LIMIT`. | Session, owner or admin |
 | DELETE `/api/organizations/{organizationId}` | Soft-delete the organization (see below). Body `{ slug }` must repeat the workspace's current slug as explicit confirmation; a mismatch returns 409 `ORGANIZATION_SLUG_MISMATCH`. Writes an `organization.deleted` audit record. Rate-limited (40 per user per hour, 80 per IP per hour, scope `organization-deletion-user`). | Session, owner only |
 | GET/POST `/api/organizations/{organizationId}/invitations` (and accept/revoke routes under `/api/invitations/`) | Create, accept, and revoke invitations. Acceptance requires an active, email-verified account matching the invited address, is single-use, and records membership and audit data transactionally. Replay is rejected. | Session; manager roles for create/revoke; invited user for accept |
+| GET `/api/organizations/{organizationId}/members`, PATCH `/api/organizations/{organizationId}/members/{userId}` | List organization members; change a member's role or status (see session rotation in 2.2). | Session, active membership; manager roles for PATCH |
+| POST `/api/organizations/{organizationId}/projects/{projectId}/members`, PATCH `…/members/{userId}` | Add a project member; change a project member's role or status (status change revokes sessions; role-only change does not). | Session, project-management authority |
+| DELETE `/api/organizations/{organizationId}/invitations/{invitationId}` | Revoke a pending invitation. | Session, manager roles |
+| PATCH `/api/organizations/{organizationId}/notifications/{notificationId}` | Mark one notification read or unread (recipient only). | Session, recipient |
+| PATCH `/api/organizations/{organizationId}/projects/{projectId}/tasks/bulk` | Safe bulk priority update for versioned tasks. | Session, work authority |
+| PUT `/api/organizations/{organizationId}/projects/{projectId}/tasks/workflow` | Replace the project's configurable task workflow (requires one completion column and unique names). | Session, project-management authority |
 
 ### 2.4 Projects, milestones, tasks, comments
 
@@ -191,6 +214,8 @@ an active organization membership plus project visibility, enforced by
 | Comments | Append-only creation on a task, with mention extraction. No edit or delete endpoint exists. |
 | Activity | Project activity feed, backed by audit events, most recent first. |
 | Analytics | GET `…/projects/{projectId}/analytics` — calculated progress, completion, overdue work, workload (including unassigned), milestone progress, recent activity (trailing seven days, at most five events), upcoming deadlines (at most eight), and rule-based health with its reason. No AI insight, no capacity percentage. |
+
+Route methods, verified against the route files: projects `GET / POST` (collection) and `GET / PATCH / DELETE` (one); milestones `GET / POST` and `GET / PATCH / DELETE`; tasks `GET / POST` and `GET / PATCH / DELETE` (DELETE archives); comments `GET / POST`; activity `GET`; analytics `GET`; realtime stream `GET`; files `GET / POST` and `GET / PUT / DELETE`. There is no task, milestone, or comment edit-after-create beyond PATCH, and no comment edit or delete endpoint.
 
 **Project update idempotency (opt-in).** PATCH `…/projects/{projectId}`
 accepts an optional `idempotency-key` header (same 8–128 character

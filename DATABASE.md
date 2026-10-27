@@ -15,6 +15,16 @@ the model. No application code is included here.
   `scripts/migrate.mjs` under a session advisory lock, with a checksum
   recorded in `nexora.schema_migrations`. A checksum mismatch fails the
   run. The migrator applies `db/runtime-grants.sql` in the same run.
+- **Exception — migration 0048 (2026-10-27, user-authorized):** 0048 was
+  corrected from plain `CREATE FUNCTION` to `CREATE OR REPLACE` for its
+  two lifecycle functions so a fresh database can migrate 0001–0048
+  (previously it aborted at 0048 because 0012 already created them).
+  The bodies are definition-identical, so no database state changes,
+  but the file checksum changed from
+  `feaa1fc3151f1ccaf5c89d2a9bc6c75b46b0c02265d0c24e4a1abedb3f06a209` to
+  `2f91e160da5e61bb1cf9672d5ae8f857e8bf0e1505be4e2ea971773d09425119`.
+  Production's recorded 0048 checksum must be updated to the new value
+  before any future migrator run against production.
 - **Not used:** Redis, a queue store, or a separate analytics store.
   Rate limits, idempotency, and notifications are PostgreSQL tables.
   Task-file bytes are not in the database; only their metadata is (see

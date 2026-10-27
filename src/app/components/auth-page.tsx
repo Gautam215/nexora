@@ -65,11 +65,16 @@ export default function AuthPage({ mode, nextPath }: AuthPageProps) {
     let endpoint = "";
     let body: Record<string, string> = {};
     if (mode === "register") {
+      const password = String(form.get("password") ?? "");
+      if (password !== confirmPassword) {
+        setError("The passwords do not match.");
+        return;
+      }
       endpoint = "/api/auth/register";
       body = {
         name: String(form.get("name") ?? ""),
         email,
-        password: String(form.get("password") ?? ""),
+        password,
       };
     } else if (mode === "login") {
       endpoint = "/api/auth/login";
@@ -115,7 +120,7 @@ export default function AuthPage({ mode, nextPath }: AuthPageProps) {
       } else if (mode === "resend-verification") {
         setMessage("If the address is eligible, a confirmation link will arrive by email.");
       } else {
-        setMessage("Check your inbox for a confirmation link. You can request another one below.");
+        setMessage("Check your inbox for a confirmation link. You must confirm your email before you can sign in. If no link arrived, request another one below.");
       }
     } catch {
       setError("The service could not be reached. Try again in a moment.");
@@ -212,9 +217,9 @@ export default function AuthPage({ mode, nextPath }: AuthPageProps) {
                 </label>
               )}
 
-              {mode === "reset-password" && (
+              {(mode === "register" || mode === "reset-password") && (
                 <label className="form-field">
-                  <span>Confirm new password</span>
+                  <span>{mode === "register" ? "Confirm password" : "Confirm new password"}</span>
                   <input
                     name="confirmPassword"
                     type="password"
