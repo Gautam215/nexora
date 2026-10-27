@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { projectCreateSchema } from "../../../../../security/project-schemas.ts";
 import {
@@ -13,6 +13,15 @@ import { isRateLimited } from "../../../../../server/auth-rate-limit.ts";
 import { withOrganizationContext } from "../../../../../server/db.ts";
 
 export const runtime = "nodejs";
+
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
+
+class IdempotencyConflictError extends Error {
+  constructor() {
+    super("Idempotency key reused with different details");
+    this.name = "IdempotencyConflictError";
+  }
+}
 
 interface RouteContext {
   params: Promise<{ organizationId: string }>;
@@ -122,26 +131,94 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       );
     }
 
+    const rawIdempotencyKey = request.headers.get("idempotency-key")?.trim() ?? "";
+    const idempotencyKey = rawIdempotencyKey === "" ? null : rawIdempotencyKey;
+    if (idempotencyKey !== null && !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
+      return jsonError(request, 400, "IDEMPOTENCY_KEY_REQUIRED", "Provide a valid idempotency key and retry.");
+    }
+    const keyHash =
+      idempotencyKey === null ? null : createHash("sha256").update(idempotencyKey).digest("hex");
+    const requestHash =
+      idempotencyKey === null
+        ? null
+        : createHash("sha256").update(JSON.stringify(parsed.value)).digest("hex");
+
     const projectId = randomUUID();
     const auditId = randomUUID();
-    const project = await withOrganizationContext(
-      principal.userId,
-      organizationId,
-      async (transaction) => {
-        await transaction.query(
-          `INSERT INTO nexora.projects
+    let project: {
+      id: string;
+      organization_id: string;
+      name: string;
+      description: string | null;
+      status: string;
+      owner_user_id: string;
+      start_date: string | null;
+      target_date: string | null;
+      version: number;
+      created_at: Date;
+      updated_at: Date;
+    };
+    try {
+      project = await withOrganizationContext(
+        principal.userId,
+        organizationId,
+        async (transaction) => {
+          // Idempotency replay, following the organization pattern:
+          // same key + same body returns the stored project, same
+          // key + different body is a conflict, and an expired row
+          // is removed so a later retry can create afresh.
+          if (idempotencyKey !== null && keyHash !== null && requestHash !== null) {
+            const existing = await transaction.query<{
+              request_hash: string;
+              response_body: {
+                project: {
+                  id: string;
+                  organization_id: string;
+                  name: string;
+                  description: string | null;
+                  status: string;
+                  owner_user_id: string;
+                  start_date: string | null;
+                  target_date: string | null;
+                  version: number;
+                  created_at: Date;
+                  updated_at: Date;
+                };
+              };
+              expires_at: Date;
+            }>(
+              `SELECT request_hash, response_body, expires_at
+               FROM nexora.project_creation_idempotency
+               WHERE organization_id = $1 AND actor_user_id = $2 AND operation = $3 AND key_hash = $4`,
+              [organizationId, principal.userId, "project.create", keyHash],
+            );
+            const prior = existing.rows[0];
+            if (prior && prior.expires_at > new Date()) {
+              if (prior.request_hash !== requestHash) throw new IdempotencyConflictError();
+              return prior.response_body.project;
+            }
+            if (prior) {
+              await transaction.query(
+                `DELETE FROM nexora.project_creation_idempotency
+                 WHERE organization_id = $1 AND actor_user_id = $2 AND operation = $3 AND key_hash = $4`,
+                [organizationId, principal.userId, "project.create", keyHash],
+              );
+            }
+          }
+          await transaction.query(
+            `INSERT INTO nexora.projects
              (id, organization_id, name, description, owner_user_id, start_date, target_date)
            VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-          [
-            projectId,
-            organizationId,
-            parsed.value.name,
-            parsed.value.description ?? null,
-            principal.userId,
-            parsed.value.startDate ?? null,
-            parsed.value.targetDate ?? null,
-          ],
-        );
+            [
+              projectId,
+              organizationId,
+              parsed.value.name,
+              parsed.value.description ?? null,
+              principal.userId,
+              parsed.value.startDate ?? null,
+              parsed.value.targetDate ?? null,
+            ],
+          );
 
         await transaction.query(
           `INSERT INTO nexora.project_memberships
@@ -181,12 +258,26 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
            WHERE organization_id = $1 AND id = $2`,
           [organizationId, projectId],
         );
-        const project = created.rows[0];
-        if (!project) throw new Error("Created project could not be read");
-        return project;
-      },
-      "member",
-    );
+        const createdProject = created.rows[0];
+        if (!createdProject) throw new Error("Created project could not be read");
+        if (idempotencyKey !== null && keyHash !== null && requestHash !== null) {
+          await transaction.query(
+            `INSERT INTO nexora.project_creation_idempotency
+               (organization_id, actor_user_id, operation, key_hash, request_hash, response_status, response_body)
+             VALUES ($1, $2, $3, $4, $5, 201, $6::jsonb)`,
+            [organizationId, principal.userId, "project.create", keyHash, requestHash, JSON.stringify({ project: createdProject })],
+          );
+        }
+        return createdProject;
+        },
+        "member",
+      );
+    } catch (error) {
+      if (error instanceof IdempotencyConflictError) {
+        return jsonError(request, 409, "IDEMPOTENCY_KEY_REUSED", "Use a new idempotency key for different project details.");
+      }
+      throw error;
+    }
 
     return jsonOk(request, { project }, 201);
   } catch (error) {

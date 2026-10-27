@@ -37,6 +37,18 @@ the model. No application code is included here.
   notifications insert policy for system due-date reminders (see
   ARCHITECTURE.md §12). No RLS on the two job tables: they hold
   only operational rows, and the cron route is token-gated.
+- **Migration 0050 (2026-10-28 round 4):**
+  `project_creation_idempotency`, mirroring
+  `organization_creation_idempotency` (7-day expiry, grants in
+  `runtime-grants.sql`) but scoped per-actor per-organization
+  like `project_mutation_idempotency` (RLS actor + current
+  organization, membership foreign key), so the same key and
+  body in a different organization creates a second project
+  instead of replaying the first.
+  Project creation was the one creation path that duplicated on
+  retry; it now replays on the same key and body and returns
+  409 `IDEMPOTENCY_KEY_REUSED` on key reuse with a different
+  body (see API.md §1.6).
 - **Not used:** Redis, a queue store, or a separate analytics store.
   Rate limits, idempotency, and notifications are PostgreSQL tables.
   Task-file bytes are not in the database; only their metadata is (see
@@ -55,6 +67,7 @@ its load-bearing columns; the migrations give the full definition.
 | `scheduled_job_runs` | Cron job audit: `job` (due-date/cleanup/email-outbox/alerts), `run_date`, `status` (ok/failed), `detail`, one row per job per day. No RLS (operational rows only, cron route is token-gated). |
 | `alert_state` | Alert deduplication: `rule` (server-errors/database-down), `last_value`, `last_sent_at`. No RLS (operational rows only). |
 | `organization_creation_idempotency` | Organization-creation replay: per-actor key hash + request hash, response status/body, 7-day expiry. RLS mirrors the project pattern (actor only). |
+| `project_creation_idempotency` | Project-creation replay (migration 0050): same shape as the organization table, operation `project.create`, 7-day expiry, but scoped per-actor per-organization (RLS actor + current organization). |
 | `user_sessions` | Opaque sessions. `id`, `user_id`, `token_hash` (SHA-256), `created_at`, `expires_at`, `revoked_at`. A session is valid only if unexpired and unrevoked. Privilege-change revocation (migration 0039, approved default 2026-10-26): `revoke_user_sessions_for_org_privilege_change` and `revoke_user_sessions_for_project_privilege_change` (SECURITY DEFINER, owner targets refused, admin/manager caller required) set `revoked_at` on all of the target user's unrevoked sessions. |
 | `email_verification_tokens` | Single-use verification tokens, stored as hashes, one live token per user. |
 | `password_reset_tokens` | Single-use reset tokens, stored as hashes, one live token per user. |

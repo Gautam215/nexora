@@ -1773,3 +1773,118 @@ test(
     assert.equal(fetchedBody.data.project.version, 3);
   },
 );
+
+test(
+  "project creation replays on the same idempotency key and conflicts on reuse",
+  { skip: !connectionString },
+  async () => {
+    if (!smtp) {
+      smtp = await startSmtpCaptureServer();
+      process.env.SMTP_HOST = "127.0.0.1";
+      process.env.SMTP_PORT = String(smtp.port);
+      process.env.SMTP_SECURE = "false";
+      process.env.SMTP_REQUIRE_TLS = "false";
+      process.env.SMTP_USER = "";
+      process.env.SMTP_PASSWORD = "";
+      process.env.SMTP_FROM = "noreply@nexora.example.test";
+    }
+    const owner = await registerVerifyAndLogin(
+      `${randomUUID()}@example.test`,
+      "Idempotency Owner",
+      "idempotency owner password",
+    );
+    const organizationId = await createWorkspace(owner.cookie, `idem-${owner.userId.slice(0, 8)}`);
+    const path = `/api/organizations/${organizationId}/projects`;
+    const params = { params: Promise.resolve({ organizationId }) };
+
+    const first = await createProject(
+      apiRequest(path, "POST", { name: "Idempotent project" }, owner.cookie, {
+        "idempotency-key": "project-idem-001",
+      }),
+      params,
+    );
+    assert.equal(first.status, 201);
+    const firstBody = (await first.json()) as { data: { project: { id: string } } };
+    const projectId = firstBody.data.project.id;
+
+    const replay = await createProject(
+      apiRequest(path, "POST", { name: "Idempotent project" }, owner.cookie, {
+        "idempotency-key": "project-idem-001",
+      }),
+      params,
+    );
+    assert.equal(replay.status, 201);
+    const replayBody = (await replay.json()) as { data: { project: { id: string } } };
+    assert.equal(replayBody.data.project.id, projectId);
+
+    const conflict = await createProject(
+      apiRequest(path, "POST", { name: "Different project" }, owner.cookie, {
+        "idempotency-key": "project-idem-001",
+      }),
+      params,
+    );
+    assert.equal(conflict.status, 409);
+    const conflictBody = (await conflict.json()) as { error: { code: string } };
+    assert.equal(conflictBody.error.code, "IDEMPOTENCY_KEY_REUSED");
+
+    const invalid = await createProject(
+      apiRequest(path, "POST", { name: "Bad key project" }, owner.cookie, {
+        "idempotency-key": "short",
+      }),
+      params,
+    );
+    assert.equal(invalid.status, 400);
+
+    const keyless = await createProject(
+      apiRequest(path, "POST", { name: "Keyless project" }, owner.cookie),
+      params,
+    );
+    assert.equal(keyless.status, 201);
+    const keylessBody = (await keyless.json()) as { data: { project: { id: string } } };
+    assert.notEqual(keylessBody.data.project.id, projectId);
+
+    // Keys are per-actor: the same key from a different actor must
+    // create a separate project, not replay the first actor's row.
+    const other = await registerVerifyAndLogin(
+      `${randomUUID()}@example.test`,
+      "Idempotency Other",
+      "idempotency other password",
+    );
+    const otherOrganizationId = await createWorkspace(other.cookie, `idem-${other.userId.slice(0, 8)}`);
+    const otherPath = `/api/organizations/${otherOrganizationId}/projects`;
+    const otherParams = { params: Promise.resolve({ organizationId: otherOrganizationId }) };
+    const otherProject = await createProject(
+      apiRequest(otherPath, "POST", { name: "Idempotent project" }, other.cookie, {
+        "idempotency-key": "project-idem-001",
+      }),
+      otherParams,
+    );
+    assert.equal(otherProject.status, 201);
+    const otherBody = (await otherProject.json()) as { data: { project: { id: string } } };
+    assert.notEqual(otherBody.data.project.id, projectId);
+
+    // Keys are also scoped to the organization: the same actor
+    // with the same key and body in a second organization must
+    // create a second project, not replay the first one.
+    const secondOrganizationId = await createWorkspace(owner.cookie, `idem2-${owner.userId.slice(0, 8)}`);
+    const secondPath = `/api/organizations/${secondOrganizationId}/projects`;
+    const secondParams = { params: Promise.resolve({ organizationId: secondOrganizationId }) };
+    const secondProject = await createProject(
+      apiRequest(secondPath, "POST", { name: "Idempotent project" }, owner.cookie, {
+        "idempotency-key": "project-idem-001",
+      }),
+      secondParams,
+    );
+    assert.equal(secondProject.status, 201);
+    const secondBody = (await secondProject.json()) as { data: { project: { id: string } } };
+    assert.notEqual(secondBody.data.project.id, projectId);
+    assert.notEqual(secondBody.data.project.id, otherBody.data.project.id);
+
+    const listed = await listProjects(apiRequest(path, "GET", undefined, owner.cookie), params);
+    assert.equal(listed.status, 200);
+    const listedBody = (await listed.json()) as { data: { projects: Array<{ id: string }> } };
+    const ids = listedBody.data.projects.map((project) => project.id);
+    assert.equal(ids.filter((id) => id === projectId).length, 1);
+    assert.ok(ids.includes(keylessBody.data.project.id));
+  },
+);

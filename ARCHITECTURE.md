@@ -443,6 +443,34 @@ non-zero, rather than rewriting state it did not verify. Live
 ClamAV is not verified; the adapter is tested against a fake
 clamd only.
 
+## 9c. Deployment scale decision — stay single-instance (recorded default, 2026-10-28 round 4)
+
+Recorded default decision, reversible by the user at any time:
+the deployment stays single-instance. Rationale: the live
+deployment is one Vercel project on the Hobby plan serving an
+early-production workload; the codebase already documents three
+per-process limits that a second instance would break silently
+— presence rosters are per-process (§9a), metrics counters are
+process-local (§7 of the deployment runbook), and task-file
+bytes live in a server-only directory, not shared storage
+(§9a file storage). Adding a second instance before fixing
+those three would split rosters, split metrics, and strand file
+bytes, while adding Redis or shared storage would add cost and
+a dependency the current scale does not justify (AGENTS.md §5).
+This decision is a default, not a permanent architecture fact:
+it does not change any code, and it does not claim the system
+scales — it records that multi-instance operation is
+deliberately NOT supported until the reversal path below is
+done. Reversal path, in order: (1) move task-file bytes to
+durable shared storage with the documented copy-then-verify
+migration; (2) replace the in-process presence roster with a
+database-backed roster with heartbeats (or a Redis design in
+this document, approved first); (3) aggregate `/api/metrics`
+externally instead of reading one process; (4) only then run
+two instances and verify rosters, metrics, and file downloads
+across both. Until then, horizontal scaling means a larger
+single instance, not more instances.
+
 ## 10. Environment configuration
 
 All configuration is by environment variable, never by a hardcoded value

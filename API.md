@@ -80,27 +80,94 @@ error name, validated database code).
 - Sorting is by a fixed set of server-owned keys. A client-supplied sort
   key that is not on the allowlist is rejected, not interpolated.
 
-### 1.6 Idempotency
+### 1.6 Idempotency and safe retry
 
-- Organization, task, milestone, comment, and file-upload creation
-  accept an `Idempotency-Key` header. A retry with the same key
-  and the same payload replays the original result. The same key
-  with different content returns 409 `IDEMPOTENCY_KEY_REUSED`.
-  Organization keys are per-actor, expire after 7 days (an expired
-  row is deleted so a later retry can create afresh), and are
-  validated against the same pattern as the project route
-  (`/^[A-Za-z0-9._:-]{8,128}$/`, invalid → 400
-  `IDEMPOTENCY_KEY_REQUIRED`).
-- File replacement uses `If-Match` with the current file version instead
-  of an idempotency key; a stale version returns 409 and the replacement
-  does not happen.
-- Invitations, AI-generated resource creation, notifications, and
-  background jobs are the other operations that must use idempotency
-  when they are built; today, the five creation paths above are
-  covered, and the remaining gap is recorded in the implementation
-  plan. Scheduled jobs are idempotent by a different mechanism: one
-  claimed row per job per day in `nexora.scheduled_job_runs`
-  (see §2.8).
+Every mutation falls in exactly one of the retry classes below.
+A retry is "safe" when it cannot create a duplicate resource or
+apply an effect twice; only the key class replays the original
+response, the others fail or converge instead.
+
+- **Idempotency-key creation (replay).** Organization, project,
+  task, milestone, comment, and file-upload creation accept an
+  `Idempotency-Key` header. A retry with the same key and the
+  same payload replays the original result. The same key with
+  different content returns 409 `IDEMPOTENCY_KEY_REUSED`. Keys
+  expire after 7 days (an expired row is deleted
+  so a later retry can create afresh), and must match
+  `/^[A-Za-z0-9._:-]{8,128}$/` (invalid → 400
+  `IDEMPOTENCY_KEY_REQUIRED`). Organization keys live in
+  `organization_creation_idempotency` (migration 0049) and are
+  per-actor; project keys live in
+  `project_creation_idempotency` (migration 0050) and are
+  per-actor per-organization, so the same key and body in a
+  different organization creates a second project instead of
+  replaying the first; task, milestone, comment, and file keys
+  live in `project_mutation_idempotency` and are per-actor
+  per-project. Project PATCH also accepts an
+  opt-in key (operation `project.update`, migration 0037, fixed
+  by 0038); its replay returns the stored project without
+  re-auditing, re-notifying, or re-publishing. The key is
+  optional on every route above: without it, a retry creates a
+  second resource, by design.
+- **Version-guarded updates and deletes (conflict, no replay).**
+  Task PATCH, milestone PATCH, task delete, and milestone delete
+  require `expectedVersion`; a stale version returns 409 and
+  nothing is applied. Project delete requires its version plus
+  a not-yet-deleted row, so a second delete with the same
+  version finds nothing to delete. File replacement uses
+  `If-Match` with the current file version instead of a key; a
+  stale version returns 409 and the replacement does not happen.
+  File delete requires the row to be not-yet-deleted, so a
+  second delete fails instead of deleting twice. Organization
+  delete requires status `active` and invitation revoke
+  requires a pending invitation, so a second call returns 404
+  instead of deleting twice.
+- **Conflict-safe creation (no duplicate, no replay).**
+  Organization invitation creation is guarded by the pending
+  invitation constraint: a retry after success returns 409
+  `INVITATION_PENDING` and creates no second invitation and
+  sends no second email; it does not return the original
+  invitation — list invitations to recover it. Project member
+  addition uses `ON CONFLICT DO NOTHING`: a retry returns 409
+  `PROJECT_MEMBER_EXISTS` with no duplicate row and no
+  duplicate notification.
+- **Final-state idempotent (converges, no replay).**
+  Organization settings PATCH writes an audit event only when
+  a field actually changed, so an identical retry changes no
+  state and audits nothing new. Member role PATCH, notification
+  read/unread PATCH, and notification preferences PATCH
+  converge to the same end state on retry. Workflow PUT is a
+  full replacement of the status set: a retry with the same
+  payload converges to the same set.
+- **Single-use token (second use fails, no duplicate).**
+  Invitation accept consumes its token: a second accept returns
+  400 `INVALID_INVITATION` and creates no second membership.
+  Session revoke of an already-revoked session returns 404
+  `SESSION_NOT_FOUND`; logout and revoke-others converge
+  (repeating them revokes nothing new). Password change
+  verifies the current password, so a retry after success
+  fails 401 because the old password no longer matches.
+  Register with an already-registered
+  email returns the same generic 202 and creates no second
+  account (anti-enumeration). Password-reset and verification
+  resend issue a fresh single-use token per request; a retry
+  creates no duplicate account or session, but it may issue an
+  additional token, which is by design for delivery retries.
+- **Generate-only AI routes (no resource, no key).** AI
+  planning/extraction/summarize/risk/assistant generation
+  creates no user-visible resource — only an execution record —
+  so there is nothing to replay; a retry runs the provider
+  again and records a second execution. The confirm endpoints
+  that do create milestones or tasks from a draft are
+  key-covered above.
+- **Background jobs (daily claim, not a key).** Scheduled jobs
+  are idempotent by a different mechanism: one claimed row per
+  job per day in `nexora.scheduled_job_runs` (see §2.8). A
+  repeated call the same day replays the first run's result.
+- **No key and no guard — none remaining.** Every mutation
+  route in §2 is covered by one of the classes above; a route
+  added later must state its class in this section in the same
+  change, or it ships without a retry story.
 
 ### 1.7 API evolution
 

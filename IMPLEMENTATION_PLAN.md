@@ -774,16 +774,18 @@ this plan's phases and must not be retried by working around that block.
 - **AI (PRD 17–22, 24) and realtime (PRD 25).** No design yet; need
   user decisions and no new SDK dependencies without one.
 
-## PRD §44 roadmap — PROPOSAL (needs user approval, not decided fact)
+## PRD §44 roadmap — APPROVED 2026-10-28
 
-The following roadmap is a proposal drafted 2026-10-27 (round 3).
-Owners are roles, not people; effort is an estimate, not a
-commitment; dates are placeholders until the user sets them.
-Nothing in this section is approved until the user approves it
-explicitly. It exists because PRD §44 (schedule, owners,
-estimates, release gates) cannot be marked complete without it,
-and leaving it blank was the last Foundation row that could be
-drafted without a credential or a live service.
+The following roadmap was drafted 2026-10-27 (round 3) and
+APPROVED by the user 2026-10-28. Owners are roles, not people;
+effort is an estimate, not a commitment; dates are placeholders
+until the user sets them. Approval of this roadmap does not by
+itself provision Phase B integrations or pass Phase C human
+acceptance — each of those still needs its own credential,
+service, or human pass. It exists because PRD §44 (schedule,
+owners, estimates, release gates) cannot be marked complete
+without it, and leaving it blank was the last Foundation row
+that could be drafted without a credential or a live service.
 
 ### Phase A — Operate what is live (operator, days)
 - Add the cron schedule from `docs/deployment.md` §6
@@ -828,10 +830,24 @@ drafted without a credential or a live service.
   and metrics aggregation — each needs a design (Redis or a
   database-backed roster) before any code. Gate: a written
   decision per item, or an explicit "stay single-instance".
+  Recorded default, 2026-10-28 round 4 (ARCHITECTURE.md §9c):
+  stay single-instance. Rationale: Hobby deployment, current
+  scale, and the three per-process limits (presence roster,
+  metrics counters, server-local file bytes) that a second
+  instance would break silently. Reversal path documented in
+  §9c; the user can reverse it at any time. This is a
+  recorded default, not a permanent architecture fact.
 - Full mutation idempotency beyond the five covered creation
   paths (organizations, projects, milestones, tasks,
   comments, file uploads). Gate: per-route coverage table
-  in API.md §1.6 updated with evidence.
+  in API.md §1.6 updated with evidence. Complete 2026-10-28
+  round 4: project creation was the one duplicating path and
+  is now key-covered (migration 0050, per-actor key, 7-day
+  expiry, replay + 409 conflict, actor-scoping test); every
+  other mutation route now has a stated retry class in
+  API.md §1.6 — key replay, version conflict, conflict-safe
+  creation, final-state convergence, or single-use-token
+  failure — with no route left without a retry story.
 
 Release gates for any "production-ready" claim: Phase A
 complete, Phase B integrations verified or explicitly

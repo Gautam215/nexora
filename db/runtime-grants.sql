@@ -220,6 +220,8 @@ GRANT INSERT, SELECT, UPDATE ON TABLE nexora.scheduled_job_runs TO nexora_app;
 
 GRANT INSERT, SELECT, DELETE ON TABLE nexora.organization_creation_idempotency TO nexora_app;
 
+GRANT INSERT, SELECT, DELETE ON TABLE nexora.project_creation_idempotency TO nexora_app;
+
 GRANT INSERT, SELECT, UPDATE ON TABLE nexora.alert_state TO nexora_app;
 
 GRANT SELECT (

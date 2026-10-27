@@ -15,6 +15,18 @@ row counts are RLS-filtered (no tenant session), so for a
 meaningful dataset size run it with the migrator role, as was
 done for the baseline below.
 
+`scripts/seed-benchmark-dataset.mjs` (2026-10-28 round 4)
+builds the realistic dataset the old baseline lacked: 200
+organizations, 500 projects, 5000 tasks, 2000 task files, 5000
+notifications, seeded as the migrator role with per-organization
+tenant context. Run it ONLY against a disposable database,
+never production. `scripts/production-load-probe.mjs` is the
+bounded read-only probe for the deployed app (health + ready
+only, 5 concurrent, 50 requests, 10-second timeout, aborts
+above 10% failures); it is NOT run by this repo's gates and
+must NOT run against production without the operator's
+explicit approval for that run.
+
 ## Baseline — 2026-10-26, local PostgreSQL 16, disposable test database
 
 Dataset: 10 organizations, 10 projects, 11 tasks, 6 task files,
@@ -36,6 +48,38 @@ and give a regression baseline to compare future runs against on
 the same dataset — they do not establish that the same queries
 stay fast at production scale, with tenant RLS filters, or under
 concurrent load.
+
+## Realistic dataset — 2026-10-28 round 4, local PostgreSQL 16, disposable test database
+
+Dataset (scripts/seed-benchmark-dataset.mjs, migrator role):
+200 organizations, 500 projects, 5000 tasks, 2000 task files,
+5000 notifications — a plausible early-production workload.
+Run on the same VM as the database, no concurrent load, no
+tenant RLS filtering on most queries (the migrator role
+bypasses RLS). These are LOCAL measurements, not production
+acceptance.
+
+| Query | Mean (ms) | p50 (ms) | p95 (ms) |
+| --- | --- | --- | --- |
+| list_projects | 0.97 | 0.81 | 3.07 |
+| list_tasks | 1.76 | 1.63 | 3.67 |
+| search_files_by_name | 0.51 | 0.52 | 1.30 |
+| list_notifications | 0.22 | 0.18 | 0.53 |
+| org_storage_usage | 0.51 | 0.46 | 0.94 |
+
+Reading: all five shapes stay under 4 ms at p95 on this
+dataset, on local hardware, without concurrency. Two honest
+limits: `list_notifications` ran against 0 visible rows for
+the migrator role — `notifications` has FORCE RLS, so the
+owner sees none without a recipient tenant session (the 5000
+seeded rows were verified separately under a recipient
+session) — that row is a query-shape check, not a
+notification-scale measurement. And none of this covers
+concurrent load, tenant-filtered plans, or the deployed
+environment; the bounded read-only probe
+(`scripts/production-load-probe.mjs`) exists for the
+deployed-app comparison, and it has NOT been run against
+production in this round.
 
 ## Timeout, retry, and circuit-breaker inventory
 
