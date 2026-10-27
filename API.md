@@ -82,17 +82,25 @@ error name, validated database code).
 
 ### 1.6 Idempotency
 
-- Task, milestone, comment, and file-upload creation accept an
-  `Idempotency-Key` header. A retry with the same key and the same
-  payload replays the original result. The same key with different
-  content returns 409.
+- Organization, task, milestone, comment, and file-upload creation
+  accept an `Idempotency-Key` header. A retry with the same key
+  and the same payload replays the original result. The same key
+  with different content returns 409 `IDEMPOTENCY_KEY_REUSED`.
+  Organization keys are per-actor, expire after 7 days (an expired
+  row is deleted so a later retry can create afresh), and are
+  validated against the same pattern as the project route
+  (`/^[A-Za-z0-9._:-]{8,128}$/`, invalid → 400
+  `IDEMPOTENCY_KEY_REQUIRED`).
 - File replacement uses `If-Match` with the current file version instead
   of an idempotency key; a stale version returns 409 and the replacement
   does not happen.
 - Invitations, AI-generated resource creation, notifications, and
   background jobs are the other operations that must use idempotency
-  when they are built; today, only the four creation paths above are
-  covered, and the gap is recorded in the implementation plan.
+  when they are built; today, the five creation paths above are
+  covered, and the remaining gap is recorded in the implementation
+  plan. Scheduled jobs are idempotent by a different mechanism: one
+  claimed row per job per day in `nexora.scheduled_job_runs`
+  (see §2.8).
 
 ### 1.7 API evolution
 
@@ -186,7 +194,7 @@ OAuth endpoints exist anymore; requests to the old paths 404.
 | Method and path | Purpose | Auth and role |
 | --- | --- | --- |
 | GET `/api/organizations` | List the caller's organizations. | Session, active membership |
-| POST `/api/organizations` | Create an organization; the creator becomes its owner member transactionally, with an audit record. | Session |
+| POST `/api/organizations` | Create an organization; the creator becomes its owner member transactionally, with an audit record. Accepts `Idempotency-Key` (see §1.6). | Session |
 | GET `/api/organizations/{organizationId}` | Organization detail. | Session, active membership |
 | PATCH `/api/organizations/{organizationId}` | Update organization name and/or slug, with the same validation as creation, and optionally `storageQuotaBytes` (positive integer up to 1 TiB, or `null` to clear the quota). Slug conflicts return 409 `SLUG_TAKEN`; a change writes an `organization.updated` audit record with previous and new values. A save with no changes succeeds and writes no audit row. Rate-limited (40 per user per hour, 80 per IP per hour, scope `organization-settings-user`). The response includes `storage_quota_bytes` and `storage_usage_bytes` (active file bytes across the workspace); GET returns the same two fields. NULL quota means no organization cap — per-task caps (20 files, 100 MB) still apply. Uploads and replacements over the quota return 409 `ORGANIZATION_STORAGE_LIMIT`. | Session, owner or admin |
 | DELETE `/api/organizations/{organizationId}` | Soft-delete the organization (see below). Body `{ slug }` must repeat the workspace's current slug as explicit confirmation; a mismatch returns 409 `ORGANIZATION_SLUG_MISMATCH`. Writes an `organization.deleted` audit record. Rate-limited (40 per user per hour, 80 per IP per hour, scope `organization-deletion-user`). | Session, owner only |
@@ -303,6 +311,21 @@ Base path:
 | PUT `/files/{fileId}` | Replaces content and metadata. Requires work authorization, same origin, and `If-Match` with the current version. Stale version returns 409; success increments the version and invalidates older signed links. |
 | DELETE `/files/{fileId}` | Soft-deletes immediately, revokes links. Purge after 30 days is by the operator-run cleanup command, not by this route. |
 
+### 2.8 Scheduled jobs (cron)
+
+| Method and path | Purpose | Auth |
+| --- | --- | --- |
+| GET `/api/cron/{job}` | Run one scheduled job: `due-date` (reminders for tasks due tomorrow), `cleanup` (expired-record purge + file-object removal), `email-outbox` (one notification-email worker batch), `alerts` (metrics alerting on the SMTP path). A second call the same day replays the first run's result; a failed run can be retried the same day. | `x-nexora-cron-token` header, `NEXORA_CRON_TOKEN` env; unset token → 503, wrong token → 401, unknown job → 404. The origin check does not apply (cron callers are not browsers). |
+
+Alerts: server-error total crossing a new multiple of
+`NEXORA_ALERT_SERVER_ERROR_THRESHOLD` (default 10) since the last
+alert, and database-down (at most once an hour), each mailed to
+`NEXORA_ALERT_EMAIL`. Blank `NEXORA_ALERT_EMAIL` means alerts are
+disabled. Storage quota: an explicit per-organization quota always
+wins; otherwise `NEXORA_DEFAULT_STORAGE_QUOTA_BYTES` (opt-in,
+positive integer bytes, recommended 1073741824 = 1 GiB) applies;
+blank means no cap, as before.
+
 ## 3. External APIs and integrations
 
 | Integration | How it is called | Failure behaviour |
@@ -347,6 +370,9 @@ signature. No webhook may trust a caller-supplied tenant, role, or user ID.
 | `NEXORA_FILE_SIGNING_KEY` | At least 32 bytes, server-only, for five-minute signed download links. |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_REQUIRE_TLS`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Outbound email. `SMTP_PASSWORD` is a secret and is never logged. |
 | `NEXORA_TRUSTED_CLIENT_IP_HEADER` | Production trusted-ingress IP header. Blank in local development. |
+| `NEXORA_CRON_TOKEN` | Long random value for `GET /api/cron/{job}`. Blank means every cron call fails closed with 503. |
+| `NEXORA_ALERT_EMAIL`, `NEXORA_ALERT_SERVER_ERROR_THRESHOLD` | Alert recipient (blank = disabled) and server-error threshold (default 10). |
+| `NEXORA_DEFAULT_STORAGE_QUOTA_BYTES` | Opt-in default quota for organizations with no explicit quota. Blank = no cap. |
 
 ## 7. Data privacy and failure handling
 

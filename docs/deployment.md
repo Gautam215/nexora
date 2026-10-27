@@ -39,6 +39,10 @@ Never commit a real value, and never commit `.env.local`.
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_REQUIRE_TLS`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Yes | Verification and recovery email. Missing or broken SMTP fails closed with 503 on the routes that need it; it does not silently degrade. |
 | Google OAuth | Removed | Removed 2026-10-26 (migration 0047, user decision: email + password only). No OAuth variables are read anymore. |
 | `NEXORA_METRICS_TOKEN` | Recommended | Long random value, sent as `x-nexora-metrics-token`. Blank or unset means `GET /api/metrics` fails closed with 503. |
+| `NEXORA_CRON_TOKEN` | Yes, for scheduled jobs | Long random value, distinct from the metrics token, sent as `x-nexora-cron-token`. Blank or unset means every cron call fails closed with 503. |
+| `NEXORA_ALERT_EMAIL` | Recommended | Operator mailbox for metrics alerts. Blank means alerts are disabled — never sent to a guessed address. Recommended value: the operator mailbox you monitor (for this deployment, the Nexora mailbox that already sends mail). |
+| `NEXORA_ALERT_SERVER_ERROR_THRESHOLD` | No | Server-error count threshold for alerts; default 10. Database-down alerts are sent at most once an hour regardless. |
+| `NEXORA_DEFAULT_STORAGE_QUOTA_BYTES` | No | Opt-in default quota (bytes) for organizations with no explicit quota. Blank means no cap, as before. Recommended value, if a default is wanted at all: 1073741824 (1 GiB). An explicit per-organization quota always wins. |
 | `AI_PROVIDER`, `AI_PROVIDER_BASE_URL`, `AI_PROVIDER_API_KEY`, `AI_PROVIDER_MODEL` | No | Unset (or anything other than `http`/`mock`) means AI endpoints fail closed with 503 `AI_UNAVAILABLE`. `mock` is a deterministic test double and is refused in production. `http` uses a generic OpenAI-compatible chat-completions endpoint; the key is server-only and never logged. |
 
 ## 3. Database setup
@@ -86,9 +90,72 @@ Never commit a real value, and never commit `.env.local`.
 
 ## 6. Recurring jobs
 
-Jobs are operator-run scripts, not in-app schedulers. Run them from a
-host that can reach the production database, and keep each run's
-stdout as the audit trail.
+Two kinds of recurring work exist. The cron route (below) is the
+scheduled path for jobs the application itself can run; backup
+remains an operator-run script because a serverless route cannot
+`pg_dump` as a superuser/BYPASSRLS role.
+
+### 6a. Cron route (due-date, cleanup, email-outbox, alerts)
+
+`GET /api/cron/<job>` with header `x-nexora-cron-token:
+<NEXORA_CRON_TOKEN>`, where `<job>` is one of `due-date`,
+`cleanup`, `email-outbox`, `alerts` (migration 0049,
+`src/server/scheduled.ts`). The token is the only authentication:
+cron callers are not browsers, so the origin check does not apply.
+If `NEXORA_CRON_TOKEN` is unset, every call fails closed with 503.
+Each job claims one row per day in `nexora.scheduled_job_runs`;
+a second call the same day replays the first run's result instead
+of repeating work, and a failed run can be retried the same day
+(the claim is replaced, not kept as a block).
+
+- **due-date (daily, morning):** creates one in-app `due_date`
+  reminder per task due tomorrow, addressed to the assignee. The
+  reminder uses a narrow system policy (migration 0049) that
+  permits a self-addressed `due_date` insert only when the
+  transaction flag `nexora.system_job` is exactly `'due-date'`
+  (set only by this route), the recipient can work on the
+  project, and the recipient has not disabled `due_date` in-app
+  notifications. No other event or actor can use that policy.
+- **cleanup (daily, off-peak):** purges expired organizations
+  (tombstone + audit retained, slug reserved), projects,
+  milestones, and task files through the existing purge
+  functions, and removes the file objects those purges return.
+  A failed object removal leaves an orphan for
+  `scripts/cleanup-task-files.mjs` to report; it does not fail
+  the database purge.
+- **email-outbox (every minute):** runs one worker batch
+  (20 rows, same as `npm run notifications:email-worker`).
+  Fails closed when SMTP is unconfigured; rows stay pending.
+- **alerts (every 5–15 minutes):** evaluates the metrics
+  counters (see §6b) and mails the operator when a rule fires.
+  Counters are process-local, so on a multi-instance deployment
+  this job evaluates whichever instance serves the cron call;
+  external aggregation of `/api/metrics` remains the recommended
+  monitor there, and the database-down rule works on every
+  instance.
+
+Production steps (the repository schedules nothing by itself —
+do not add a `vercel.json` crons block without deciding the
+schedule below, because deploying one starts the schedule):
+1. Set `NEXORA_CRON_TOKEN` (long random value, distinct from
+   `NEXORA_METRICS_TOKEN`) in Production and redeploy.
+2. Add the schedule in the scheduler of choice. Example Vercel
+   Cron paths (a `vercel.json` snippet to add deliberately, not
+   shipped by default): `due-date` daily, `cleanup` daily
+   off-peak, `email-outbox` every minute, `alerts` every 10
+   minutes — each as a GET to `/api/cron/<job>` with the cron
+   token header (Vercel Cron sends no custom header by default,
+   so if the scheduler cannot send headers, call the route from
+   a small scheduled caller that can, or use the operator scripts
+   in §6b instead; never remove the token to make scheduling
+   easier).
+3. Check the first run of each job in `scheduled_job_runs`
+   (status `ok` and its detail) before relying on it.
+
+### 6b. Operator-run scripts
+
+Run them from a host that can reach the production database, and
+keep each run's stdout as the audit trail.
 
 - **Cleanup, daily (off-peak):**
   `DATABASE_URL=<runtime-role-url> NEXORA_PRIVATE_FILE_DIR=<production dir> node scripts/cleanup-task-files.mjs`

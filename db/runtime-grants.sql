@@ -17,6 +17,7 @@ GRANT EXECUTE ON FUNCTION nexora.list_current_project_members(uuid, uuid) TO nex
 GRANT EXECUTE ON FUNCTION nexora.can_work_current_project(uuid, uuid) TO nexora_app;
 GRANT EXECUTE ON FUNCTION nexora.enqueue_project_notification(uuid, uuid, uuid, uuid, text, text, uuid, text, text, text, text) TO nexora_app;
 GRANT EXECUTE ON FUNCTION nexora.purge_expired_task_files() TO nexora_app;
+GRANT EXECUTE ON FUNCTION nexora.list_due_date_tasks() TO nexora_app;
 GRANT EXECUTE ON FUNCTION nexora.purge_expired_projects() TO nexora_app;
 GRANT EXECUTE ON FUNCTION nexora.list_expired_projects() TO nexora_app;
 GRANT EXECUTE ON FUNCTION nexora.purge_expired_milestones() TO nexora_app;
@@ -205,6 +206,21 @@ GRANT SELECT (
   ),
   UPDATE (read_at)
 ON TABLE nexora.notifications TO nexora_app;
+
+-- Scheduled jobs (0049): the cron route inserts notifications only
+-- through the narrow system due-date policy, and records its own
+-- runs and alert state. No other route writes these tables.
+GRANT INSERT (
+    id, organization_id, project_id, recipient_user_id, actor_user_id,
+    event_type, target_type, target_id, dedupe_key, title, body, href
+  )
+ON TABLE nexora.notifications TO nexora_app;
+
+GRANT INSERT, SELECT, UPDATE ON TABLE nexora.scheduled_job_runs TO nexora_app;
+
+GRANT INSERT, SELECT, DELETE ON TABLE nexora.organization_creation_idempotency TO nexora_app;
+
+GRANT INSERT, SELECT, UPDATE ON TABLE nexora.alert_state TO nexora_app;
 
 GRANT SELECT (
     id, organization_id, project_id, user_id, workflow, provider, model, status,

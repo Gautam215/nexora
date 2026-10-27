@@ -68,10 +68,20 @@ own operating manual).
   milestones, tasks, comments, mentions, notifications, analytics, search,
   and private files. `src/security/` holds the validation schemas, password
   and token handling, rate limits, and organization-access rules.
-- **No background jobs in code:** The only scheduled operation that exists
-  is the file-retention/orphan cleanup script (`scripts/cleanup-task-files.mjs`),
-  which the operator must run daily. It is not scheduled by the repository,
-  and that gap is recorded in the implementation plan.
+- **Scheduled jobs (migration 0049, 2026-10-27):** The token-gated
+  cron route `GET /api/cron/<job>` (`src/server/scheduled.ts`)
+  runs four jobs — `due-date` (daily reminders for tasks due
+  tomorrow), `cleanup` (expired-record purge + file-object
+  removal), `email-outbox` (one worker batch), and `alerts`
+  (metrics alerting, see §12). Each job claims one row per day in
+  `nexora.scheduled_job_runs`, so a repeated call replays instead
+  of repeating work. The repository still schedules nothing by
+  itself: the operator adds the schedule deliberately (see
+  `docs/deployment.md` §6). The file-retention/orphan cleanup
+  script (`scripts/cleanup-task-files.mjs`) remains the
+  operator-run fallback for object orphans. Backup remains an
+  operator script: a serverless route cannot `pg_dump` as a
+  superuser/BYPASSRLS role, so no cron job pretends to back up.
 
 ## 4. Data flow
 
@@ -367,6 +377,13 @@ The shape below is enforced by the code, not aspirational:
   lingers until the runtime closes the stream (SSE is
   server-to-client only, so there is no client heartbeat to age
   entries out). Presence is best-effort and never authoritative.
+  Multi-instance shared presence is NOT implemented: it would need
+  a shared roster store (Redis or a database-backed roster with
+  heartbeats), which the current stack deliberately does not add
+  (see §3 dependency rule). Until such a store is designed and
+  approved, multi-instance deployments must accept per-instance
+  rosters, and the event log (already database-shared) remains the
+  only cross-instance realtime surface.
   Production WebSocket connectivity is not claimed: this is SSE
   over HTTP, and a future WebSocket provider would replace the
   transport while keeping the event log, versioning, and
@@ -470,6 +487,17 @@ mode that silently disables rate limiting, origin checks, or file signing.
 - API → database: runtime role only, through RLS, with transaction-local
   context. The runtime role cannot own tables, bypass RLS, or hard-delete
   file rows.
+- Cron → database: the cron route's only authentication is
+  NEXORA_CRON_TOKEN (cron callers are not browsers, so the origin
+  check cannot apply). Due-date reminders use one narrow
+  exception to the notifications insert policy (migration 0049):
+  a self-addressed `due_date` insert is permitted only when the
+  transaction flag `nexora.system_job` is exactly `'due-date'`,
+  set transaction-locally by the cron route and by nothing else,
+  and only for recipients who can work on the project and have
+  not disabled `due_date` notifications. No other event, actor,
+  or code path can use that policy, and the original policy is
+  unchanged for every user-driven insert.
 - Migrator → database: schema-owner role only, direct endpoint only,
   advisory-locked, checksum-checked, grants applied in the same run.
 - Server → email: SMTP only, with tokens sent once and stored hashed.
@@ -495,10 +523,15 @@ mode that silently disables rate limiting, origin checks, or file signing.
 - **Deployment (current, single instance):** `next build` + `next start`,
   with the production database migrated by the migrator (direct endpoint,
   `sslmode=require`), the private file directory on a persistent volume,
-  `APP_ORIGIN` set to the production `https:` origin, and the cleanup
-  script scheduled daily by the operator. Multi-instance, Redis, object
-  storage, and a realtime service are future work, not current options.
-- **Release gates (not yet met):** production SMTP verification, trusted
-  ingress configuration, durable shared storage, backup and recovery
-  verification, accessibility acceptance, performance measurement, and
-  monitoring. None of these may be claimed from a local check.
+  `APP_ORIGIN` set to the production `https:` origin, and the cron
+  jobs in `docs/deployment.md` §6 scheduled by the operator.
+  Multi-instance, Redis, object storage, and a realtime service
+  are future work, not current options.
+- **Release gates (met 2026-10-27):** production SMTP verification
+  (Nexora mailbox sender, register 202) and trusted ingress
+  configuration (`x-vercel-forwarded-for`). **Still open:**
+  durable shared storage, backup and recovery verification,
+  accessibility acceptance, performance measurement, and
+  monitoring (metrics endpoint exists; production alerting needs
+  `NEXORA_ALERT_EMAIL` set, and the production cron schedule is
+  not yet added). None of these may be claimed from a local check.

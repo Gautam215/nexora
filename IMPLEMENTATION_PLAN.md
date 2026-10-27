@@ -720,9 +720,19 @@ this plan's phases and must not be retried by working around that block.
   blocked item, not a gap in the outbox itself. Verified by
   `tests/notification-email-outbox.integration.test.ts` (default
   off, opt-in once, policy-off stops email).
-- **Alert channel (Phase 4 item 4).** Metrics exist and an external
-  monitor can scrape `/api/metrics` today; the in-app alert channel
-  (email address or webhook) is the user's choice.
+- **Alert channel (Phase 4 item 4) — IMPLEMENTED 2026-10-27 under
+  the expanded-defaults mandate.** Metrics alerting is in code
+  (`src/server/alerts.ts`, alerts cron job, migration 0049):
+  server-error threshold crossings and database-down (at most
+  once an hour) mail `NEXORA_ALERT_EMAIL` over the existing
+  SMTP path, rate-limited by `alert_state` so there is no spam
+  loop. The recipient value itself is NOT invented: blank
+  means disabled. The documented recommended value is the
+  operator mailbox the user monitors (for this deployment, the
+  Nexora mailbox that already sends mail). Production still
+  needs `NEXORA_ALERT_EMAIL` set and the alerts cron scheduled
+  (Phase A above); until then alerts are disabled by design,
+  not silently active.
 - **Shared object storage (Phase 4 item 2) and malware scanning
   (item 3) — ABSTRACTIONS IMPLEMENTED 2026-10-26 under the
   user-approved defaults, live integrations NOT verified.**
@@ -763,6 +773,70 @@ this plan's phases and must not be retried by working around that block.
   outstanding and is not claimed.
 - **AI (PRD 17–22, 24) and realtime (PRD 25).** No design yet; need
   user decisions and no new SDK dependencies without one.
+
+## PRD §44 roadmap — PROPOSAL (needs user approval, not decided fact)
+
+The following roadmap is a proposal drafted 2026-10-27 (round 3).
+Owners are roles, not people; effort is an estimate, not a
+commitment; dates are placeholders until the user sets them.
+Nothing in this section is approved until the user approves it
+explicitly. It exists because PRD §44 (schedule, owners,
+estimates, release gates) cannot be marked complete without it,
+and leaving it blank was the last Foundation row that could be
+drafted without a credential or a live service.
+
+### Phase A — Operate what is live (operator, days)
+- Add the cron schedule from `docs/deployment.md` §6
+  (due-date, cleanup, email-outbox, alerts) and set
+  `NEXORA_CRON_TOKEN` + `NEXORA_ALERT_EMAIL`; verify one run
+  of each job in `scheduled_job_runs`. Gate: all four jobs
+  `ok` in production.
+- User's own production login (final unconfirmed auth step).
+  Gate: user confirms login with their own password.
+- Decide the storage-quota default: leave unset (no cap) or
+  set `NEXORA_DEFAULT_STORAGE_QUOTA_BYTES` (recommended
+  1073741824 = 1 GiB, opt-in). Gate: the value is written
+  down as a decision, not left implicit.
+
+### Phase B — Live integrations (operator + developer, days)
+- Live S3: configure a real S3-compatible endpoint, verify
+  upload/download against it, then migrate file bytes with the
+  documented copy-then-verify procedure. Gate: a file uploaded
+  and downloaded through S3 in production.
+- Live ClamAV: configure a real clamd endpoint, verify a
+  clean and an infected upload. Gate: `scan_status` moves
+  from `pending` to `clean`/`quarantined` in production.
+- Live AI M5: run the two pending evaluation cases against
+  the deployed app with the production Gemini key
+  (`gemini-3.5-flash-lite`). Gate: 10/10 cases pass, or the
+  failing cases are recorded as defects with owners.
+
+### Phase C — Acceptance (human passes, days)
+- Accessibility acceptance: screen-reader + keyboard +
+  focus-management pass on the deployed app (a human pass;
+  automated checks already pass). Gate: issues filed or
+  zero issues recorded.
+- Production performance acceptance: benchmarks on a
+  realistic dataset with targets the user approves. Gate:
+  targets written down, measurements recorded.
+- Production backup rehearsal: restore a production backup
+  to a disposable database and verify counts. Gate: restore
+  matches the source (migrations 49, tables 31).
+
+### Phase D — Scale decisions (user decisions, weeks)
+- Multi-instance: shared storage, shared presence roster,
+  and metrics aggregation — each needs a design (Redis or a
+  database-backed roster) before any code. Gate: a written
+  decision per item, or an explicit "stay single-instance".
+- Full mutation idempotency beyond the five covered creation
+  paths (organizations, projects, milestones, tasks,
+  comments, file uploads). Gate: per-route coverage table
+  in API.md §1.6 updated with evidence.
+
+Release gates for any "production-ready" claim: Phase A
+complete, Phase B integrations verified or explicitly
+deferred, Phase C passes recorded. Until then, the product
+is "live with documented open items", not "production-ready".
 
 ## Recommended first task
 

@@ -23,8 +23,20 @@ the model. No application code is included here.
   but the file checksum changed from
   `feaa1fc3151f1ccaf5c89d2a9bc6c75b46b0c02265d0c24e4a1abedb3f06a209` to
   `2f91e160da5e61bb1cf9672d5ae8f857e8bf0e1505be4e2ea971773d09425119`.
-  Production's recorded 0048 checksum must be updated to the new value
-  before any future migrator run against production.
+  Production's recorded 0048 checksum was updated to the new value
+  on 2026-10-27 (Neon SQL Editor, verified by re-select), so the
+  repo and production agree again.
+- **Migration 0049 (2026-10-27):** scheduled jobs and organization
+  idempotency. `scheduled_job_runs` (one row per job per day,
+  replay on repeat, retry after failure), `alert_state` (last
+  alert value/timestamp per rule, for deduplication),
+  `organization_creation_idempotency` (per-actor keyed replay,
+  7-day expiry, mirroring the project pattern), SECURITY DEFINER
+  `list_due_date_tasks()` (tasks due tomorrow, neither completed
+  nor archived, project and organization active), and one narrow
+  notifications insert policy for system due-date reminders (see
+  ARCHITECTURE.md §12). No RLS on the two job tables: they hold
+  only operational rows, and the cron route is token-gated.
 - **Not used:** Redis, a queue store, or a separate analytics store.
   Rate limits, idempotency, and notifications are PostgreSQL tables.
   Task-file bytes are not in the database; only their metadata is (see
@@ -40,6 +52,9 @@ its load-bearing columns; the migrations give the full definition.
 | --- | --- |
 | `users` | Account identity. `id`, unique `email`, `display_name`, `password_hash` (scrypt, nullable since migration 0032 for OAuth-only users; OAuth removed in migration 0047, nullability retained for migration safety — see ARCHITECTURE.md 7.1), `email_verified_at`, `created_at`, `updated_at`. |
 | `oauth_identities` | REMOVED in migration 0047 (was: Google identities, migration 0032). The table and `lookup_oauth_identity` no longer exist; migration 0032 is kept as history only. |
+| `scheduled_job_runs` | Cron job audit: `job` (due-date/cleanup/email-outbox/alerts), `run_date`, `status` (ok/failed), `detail`, one row per job per day. No RLS (operational rows only, cron route is token-gated). |
+| `alert_state` | Alert deduplication: `rule` (server-errors/database-down), `last_value`, `last_sent_at`. No RLS (operational rows only). |
+| `organization_creation_idempotency` | Organization-creation replay: per-actor key hash + request hash, response status/body, 7-day expiry. RLS mirrors the project pattern (actor only). |
 | `user_sessions` | Opaque sessions. `id`, `user_id`, `token_hash` (SHA-256), `created_at`, `expires_at`, `revoked_at`. A session is valid only if unexpired and unrevoked. Privilege-change revocation (migration 0039, approved default 2026-10-26): `revoke_user_sessions_for_org_privilege_change` and `revoke_user_sessions_for_project_privilege_change` (SECURITY DEFINER, owner targets refused, admin/manager caller required) set `revoked_at` on all of the target user's unrevoked sessions. |
 | `email_verification_tokens` | Single-use verification tokens, stored as hashes, one live token per user. |
 | `password_reset_tokens` | Single-use reset tokens, stored as hashes, one live token per user. |

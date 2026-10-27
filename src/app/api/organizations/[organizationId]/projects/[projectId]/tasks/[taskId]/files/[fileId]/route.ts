@@ -27,6 +27,7 @@ import {
   type TaskFileRecord,
 } from "../../../../../../../../../../server/task-files.ts";
 import { readObject, removeObject, writeObject } from "../../../../../../../../../../server/storage.ts";
+import { resolveOrganizationQuotaBytes } from "../../../../../../../../../../server/storage-quota.ts";
 import { scanFileForUpload } from "../../../../../../../../../../server/malware.ts";
 
 export const runtime = "nodejs";
@@ -253,7 +254,9 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
           if (Number(usage.rows[0]?.byte_count ?? 0) + body.bytes.byteLength > MAX_TASK_FILE_BYTES) {
             return { kind: "task_size_limit" as const };
           }
-          // Organization quota, excluding the file being
+          // Organization quota (explicit quota, else the opt-in
+          // NEXORA_DEFAULT_STORAGE_QUOTA_BYTES default, else no cap),
+          // excluding the file being
           // replaced (its old bytes leave when the new ones land).
           const orgQuota = await transaction.query<{ quota: string | null; used: string }>(
             `SELECT organization.storage_quota_bytes::text AS quota,
@@ -264,8 +267,9 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
             [organizationId, fileId],
           );
           const quotaRow = orgQuota.rows[0];
-          if (quotaRow?.quota !== null && quotaRow?.quota !== undefined) {
-            if (Number(quotaRow.used ?? 0) + body.bytes.byteLength > Number(quotaRow.quota)) {
+          const quotaBytes = resolveOrganizationQuotaBytes(quotaRow?.quota ?? null);
+          if (quotaBytes !== null) {
+            if (Number(quotaRow?.used ?? 0) + body.bytes.byteLength > quotaBytes) {
               return { kind: "organization_storage_limit" as const };
             }
           }
