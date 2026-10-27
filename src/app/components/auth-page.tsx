@@ -13,8 +13,6 @@ export type AuthPageMode =
 interface AuthPageProps {
   mode: AuthPageMode;
   nextPath?: string | null;
-  oauthEnabled?: boolean;
-  oauthMessage?: string | null;
 }
 
 interface ApiResponse {
@@ -45,7 +43,7 @@ const pageCopy: Record<Exclude<AuthPageMode, "verify-email">, { title: string; c
   },
 };
 
-export default function AuthPage({ mode, nextPath, oauthEnabled, oauthMessage }: AuthPageProps) {
+export default function AuthPage({ mode, nextPath }: AuthPageProps) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -236,16 +234,7 @@ export default function AuthPage({ mode, nextPath, oauthEnabled, oauthMessage }:
             </form>
           ) : null}
 
-          {mode === "login" && oauthEnabled && (
-            <form className="auth-form" method="post" action="/api/auth/oauth/google/start">
-              <input type="hidden" name="next" value={nextPath ?? "/workspaces"} />
-              <button className="primary-button" type="submit">
-                Continue with Google
-              </button>
-            </form>
-          )}
 
-          {oauthMessage && <p className="form-message form-error" role="alert">{oauthMessage}</p>}
           {error && <p className="form-message form-error" role="alert">{error}</p>}
           {message && <p className="form-message form-success" role="status" aria-live="polite">{message}</p>}
           <nav className="auth-links" aria-label="Account links">{linksFor(mode, verified, nextPath)}</nav>

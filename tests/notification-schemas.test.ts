@@ -26,7 +26,16 @@ test("notification preferences are bounded, unique, and use known event types", 
   assert.equal(notificationPreferencesSchema.safeParse({
     preferences: [{ eventType: "unknown", inAppEnabled: true }],
   }).success, false);
+  // emailEnabled became a legitimate field with the notification
+  // email outbox (approved default, 2026-10-26): it is opt-in and
+  // only takes effect when the operator configured the event type.
   assert.equal(notificationPreferencesSchema.safeParse({
     preferences: [{ eventType: "mention", inAppEnabled: true, emailEnabled: true }],
+  }).success, true);
+  assert.equal(notificationPreferencesSchema.safeParse({
+    preferences: [{ eventType: "mention", inAppEnabled: true, emailEnabled: "yes" }],
+  }).success, false);
+  assert.equal(notificationPreferencesSchema.safeParse({
+    preferences: [{ eventType: "mention", inAppEnabled: true, unknownField: true }],
   }).success, false);
 });

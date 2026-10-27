@@ -47,10 +47,16 @@ export async function GET(
           name: string;
           slug: string;
           role: string;
+          storage_quota_bytes: string | null;
+          storage_usage_bytes: string;
           created_at: Date;
         }>(
           `SELECT organization.id, organization.name, organization.slug,
-                  membership.role::text AS role, organization.created_at
+                  membership.role::text AS role,
+                  organization.storage_quota_bytes::text AS storage_quota_bytes,
+                  (SELECT COALESCE(sum(byte_size), 0)::text FROM nexora.task_files
+                   WHERE organization_id = organization.id AND deleted_at IS NULL) AS storage_usage_bytes,
+                  organization.created_at
            FROM nexora.organizations AS organization
            JOIN nexora.organization_memberships AS membership
              ON membership.organization_id = organization.id
@@ -68,7 +74,13 @@ export async function GET(
     if (!organization) {
       return jsonError(request, 404, "ORGANIZATION_NOT_FOUND", "Workspace not found.");
     }
-    return jsonOk(request, { organization });
+    return jsonOk(request, {
+      organization: {
+        ...organization,
+        storage_quota_bytes: organization.storage_quota_bytes === null ? null : Number(organization.storage_quota_bytes),
+        storage_usage_bytes: Number(organization.storage_usage_bytes),
+      },
+    });
   } catch (error) {
     return jsonServerFailure(request, "organizations.get", error);
   }
@@ -108,7 +120,14 @@ export async function PATCH(
       | { kind: "forbidden" }
       | {
           kind: "ok";
-          organization: { id: string; name: string; slug: string; updated_at: Date };
+          organization: {
+            id: string;
+            name: string;
+            slug: string;
+            storage_quota_bytes: number | null;
+            storage_usage_bytes: number;
+            updated_at: Date;
+          };
         };
     try {
       updated = await withOrganizationContext(
@@ -126,8 +145,10 @@ export async function PATCH(
             id: string;
             name: string;
             slug: string;
+            storage_quota_bytes: string | null;
           }>(
-            `SELECT id, name, slug FROM nexora.organizations
+            `SELECT id, name, slug, storage_quota_bytes::text AS storage_quota_bytes
+             FROM nexora.organizations
              WHERE id = $1 AND status = 'active' LIMIT 1`,
             [organizationId],
           );
@@ -139,23 +160,37 @@ export async function PATCH(
 
           const name = parsed.value.name ?? current.name;
           const slug = parsed.value.slug ?? current.slug;
+          const currentQuota = current.storage_quota_bytes === null ? null : Number(current.storage_quota_bytes);
+          const quota = parsed.value.storageQuotaBytes !== undefined ? parsed.value.storageQuotaBytes : currentQuota;
           const changedFields = [
             ...(name !== current.name ? ["name"] : []),
             ...(slug !== current.slug ? ["slug"] : []),
+            ...(quota !== currentQuota ? ["storageQuotaBytes"] : []),
           ];
           const result = await transaction.query<{
             id: string;
             name: string;
             slug: string;
+            storage_quota_bytes: string | null;
             updated_at: Date;
           }>(
-            `UPDATE nexora.organizations SET name = $1, slug = $2
-             WHERE id = $3 AND status = 'active'
-             RETURNING id, name, slug, updated_at`,
-            [name, slug, organizationId],
+            `UPDATE nexora.organizations SET name = $1, slug = $2, storage_quota_bytes = $3
+             WHERE id = $4 AND status = 'active'
+             RETURNING id, name, slug, storage_quota_bytes::text AS storage_quota_bytes, updated_at`,
+            [name, slug, quota, organizationId],
           );
-          const row = result.rows[0];
-          if (!row) return { kind: "not_found" as const };
+          const rawRow = result.rows[0];
+          if (!rawRow) return { kind: "not_found" as const };
+          const usageResult = await transaction.query<{ byte_count: string }>(
+            `SELECT COALESCE(sum(byte_size), 0)::text AS byte_count FROM nexora.task_files
+             WHERE organization_id = $1 AND deleted_at IS NULL`,
+            [organizationId],
+          );
+          const row = {
+            ...rawRow,
+            storage_quota_bytes: rawRow.storage_quota_bytes === null ? null : Number(rawRow.storage_quota_bytes),
+            storage_usage_bytes: Number(usageResult.rows[0]?.byte_count ?? 0),
+          };
           if (changedFields.length > 0) {
             await transaction.query(
               `INSERT INTO nexora.audit_events
@@ -173,6 +208,9 @@ export async function PATCH(
                     : {}),
                   ...(slug !== current.slug
                     ? { previousSlug: current.slug, slug }
+                    : {}),
+                  ...(quota !== currentQuota
+                    ? { previousStorageQuotaBytes: currentQuota, storageQuotaBytes: quota }
                     : {}),
                 }),
               ],

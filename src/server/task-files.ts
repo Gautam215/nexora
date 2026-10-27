@@ -12,6 +12,7 @@ export interface TaskFileRecord {
   storage_key: string;
   uploaded_by_user_id: string;
   uploaded_by_name?: string | null;
+  scan_status?: "pending" | "clean" | "quarantined" | null;
   version: number;
   created_at: Date;
   updated_at: Date;
@@ -25,18 +26,24 @@ export interface PublicTaskFile {
   mime_type: string;
   byte_size: number;
   uploaded_by_name: string | null;
+  scan_status: "pending" | "clean" | "quarantined";
   version: number;
   created_at: Date;
   updated_at: Date;
 }
 
 export function publicTaskFile(file: TaskFileRecord): PublicTaskFile {
+  // Rows written before migration 0044 have no scan_status in
+  // memory; the column default is 'pending', and 'pending' is
+  // the honest value for an unscanned file.
+  const scanStatus = file.scan_status ?? "pending";
   return {
     id: file.id,
     original_filename: file.original_filename,
     mime_type: file.mime_type,
     byte_size: Number(file.byte_size),
     uploaded_by_name: file.uploaded_by_name ?? null,
+    scan_status: scanStatus === "clean" || scanStatus === "quarantined" ? scanStatus : "pending",
     version: file.version,
     created_at: file.created_at,
     updated_at: file.updated_at,

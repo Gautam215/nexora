@@ -107,7 +107,7 @@ exist.
 | --- | --- | --- |
 | GET `/api/health` | Liveness check. Returns the process status and the database state (`up`, `unavailable`, or `unconfigured`) without secrets, versions, or database detail. Always returns 200 for a live process; the `database` field, not the status code, reports database state, so that a Neon scale-to-zero wake-up does not flap a liveness probe. | None. A health probe cannot authenticate. |
 | GET `/api/ready` | Readiness check. Returns 200 with `{ ready: true }` only when the database probe succeeds, 503 otherwise, so a load balancer can hold traffic until the process can actually serve. No detail beyond the boolean. | None. A readiness probe cannot authenticate. |
-| GET `/api/metrics` | Operator metrics: uptime, request counts by status class and normalized path, failures by operation, timed database probe latency, pool counters, and realtime counters (live/total stream connections, events published, events enqueued to streams). Paths are normalized (UUID/numeric segments become `:id`) and query strings are never recorded; no user data or credential is ever reported. Counters are process-local; OAuth redirects are not counted (they bypass the JSON helpers). "Delivered" means enqueued to a stream controller, not client-acknowledged (SSE has no acknowledgements). Fails closed with 503 when `NEXORA_METRICS_TOKEN` is unset. | Shared token in the `x-nexora-metrics-token` header, compared in constant time. Not a user session. |
+| GET `/api/metrics` | Operator metrics: uptime, request counts by status class and normalized path, failures by operation, timed database probe latency, pool counters, and realtime counters (live/total stream connections, events published, events enqueued to streams). Paths are normalized (UUID/numeric segments become `:id`) and query strings are never recorded; no user data or credential is ever reported. Counters are process-local. "Delivered" means enqueued to a stream controller, not client-acknowledged (SSE has no acknowledgements). Fails closed with 503 when `NEXORA_METRICS_TOKEN` is unset. | Shared token in the `x-nexora-metrics-token` header, compared in constant time. Not a user session. |
 
 ### 2.1a AI (new in this change)
 
@@ -140,59 +140,29 @@ exist.
 | GET `/api/auth/sessions` | List the authenticated user's active sessions (id, created, last seen, expiry, `current` flag only; never a token or token hash). Expired and revoked sessions are excluded. | Session |
 | POST `/api/auth/sessions/revoke` | Revoke one own session by id. Not-found, already-revoked, expired, and another user's session all return the same 404. Revoking the current session clears its cookie. | Session |
 | POST `/api/auth/sessions/revoke-others` | Revoke all of the authenticated user's sessions except the current one, returning the count. | Session |
+
+**Session rotation on privilege change (approved default, 2026-10-26, migration 0039).** No periodic rotation. PATCH on an organization member revokes all of that member's sessions (count in `sessionsRevoked`, also in the `membership.updated` audit details) when the new status is not active or the new role ranks below the previous role (owner > admin > member > guest); promotion and re-enable do not revoke. PATCH on a project member revokes only when the new status is not active; a project role-only change does not revoke, because project authorization is re-checked on every request. Password change revokes all other sessions and keeps the current session; password reset revokes all sessions.
 | POST `/api/auth/verification/consume` | Consume a single-use verification token. | None (token) |
 | POST `/api/auth/verification/resend` (resend-verification page route) | Re-issue a verification link. Non-enumerating response. | None |
 | POST `/api/auth/password-reset` (request) | Issue a single-use reset token. Non-enumerating response. | None |
 | POST `/api/auth/password-reset/consume` (or the shipped reset route) | Consume a reset token and set a new password. | None (token) |
 
-Missing, and not to be implied by the API surface: OAuth
-implementation. Logged-in password change, active-session listing,
-and revoke-all are now implemented (see the table above).
+Authentication is email + password only (see 2.2a for the removed
+Google OAuth). Logged-in password change, active-session listing,
+and revoke-all are implemented (see the table above).
 
-### 2.2a OAuth — IMPLEMENTED 2026-10-26 (local, unpushed)
+### 2.2a OAuth — REMOVED 2026-10-26 (email + password only)
 
-Implemented per the approved design in `ARCHITECTURE.md` section
-7.1 and verified against a local mock IdP (token + JWKS
-endpoints); live Google verification is still blocked on client
-credentials. Full rationale, linking rules, and acceptance criteria
-are in `ARCHITECTURE.md` section 7.1.
-
-| Method and path | Purpose | Auth |
-| --- | --- | --- |
-| POST `/api/auth/oauth/google/start` | Start a Google sign-in (`intent="signin"` in the flow cookie): validate the return path with `safeReturnPath`, create a 10-minute tamper-resistant flow cookie (`HttpOnly`, `SameSite=Lax`, `Secure` in production, `Path=/api/auth/oauth`, `__Host-` prefix in production, HMAC-signed with `OAUTH_FLOW_SIGNING_KEY`) holding state, PKCE verifier, nonce, return path, and intent, and redirect to Google's authorize endpoint. Returns 404 when `OAUTH_GOOGLE_ENABLED` is false, 503 when enabled but a required credential is missing (never a redirect to Google). IP rate limit: 60 per 900 seconds (`oauth-start` scope, separate from callback). | None (POST, same-origin check) |
-| POST `/api/auth/oauth/google/link/start` | Start a Google link for a signed-in user (`intent="link"`, `linkUserId` = current user): same flow-cookie rules as sign-in start, after explicit confirmation. Returns 404 when `OAUTH_GOOGLE_ENABLED` is false, 503 when enabled but a required credential is missing. IP rate limit: 60 per 900 seconds (`oauth-start` scope). | Session (POST, same-origin check) |
-| GET `/api/auth/oauth/google/callback` | Handle Google's callback for both intents: validate the HMAC-signed flow cookie and state (single-use, 10 minutes), handle provider `error` with an allowlisted error code, exchange the code server-side with the client secret, verify the `id_token` strictly (RS256 allowlist only, JWKS signature with unknown-`kid` refetch-once and fail-closed JWKS errors, `iss=https://accounts.google.com`, `aud` exactly the client ID, `exp` in the future, `nonce` match, `email_verified` exactly `true`), apply the sign-in or linking rules, delete the flow cookie, and always answer with a fixed 302 redirect (`Referrer-Policy: no-referrer`) — sign-in success to the validated return path or `/workspaces` with a session cookie (14-day, `HttpOnly`, `SameSite=Strict`), link success to `/account` with no new session, failures to `/login` or `/account` with one allowlisted error code. Returns 404 when `OAUTH_GOOGLE_ENABLED` is false. IP rate limit: 60 per 900 seconds (`oauth-callback` scope, separate from start). No same-origin check on this endpoint (the provider is cross-origin by design); state and PKCE are its CSRF defence. | None (state + PKCE); link intent additionally requires the callback session user to equal `linkUserId` |
-
-Sign-in and linking rules, in brief (full rules, account gate,
-atomicity, and error-code table in `ARCHITECTURE.md` section 7.1):
-identity lookup is always by `(provider, provider_subject)`; the
-provider email is normalized and validated with the existing
-schemas before any use and is never a lookup or linking key
-(`provider_email` has no unique constraint). Sign-in with a
-verified provider email and no existing user creates a user and
-its identity atomically, then one session; sign-in with a
-verified provider email that already belongs to a Nexora user
-does NOT link and does NOT create (that user must sign in with
-their password and link from Account security); provider-unverified
-email never creates, links, or signs in; a disabled account never
-receives a session through OAuth in either flow. Linking (signed-in
-only, same user verified at callback, at most one Google identity
-per user) creates no new session; a provider email belonging to a
-different Nexora account refuses linking without revealing that
-account; two existing Nexora accounts are never merged
-automatically; a later provider email change updates
-`provider_email` on the identity row but never changes `users.email`
-automatically; Google's access token is discarded, offline access
-is never requested. The `oauth_identities` table (with
-`UNIQUE(provider, provider_subject)` and `UNIQUE(user_id,
-provider)`), the nullable `users.password_hash`, the
-`oauth-start`/`oauth-callback` rate-limit scopes, and the
-`lookup_oauth_identity` security-definer function returning only
-`user_id`, `status`, and `email_verified_at` are all applied by
-migration 0032 (see `ARCHITECTURE.md` section 7.1). The sign-in
-page has one Google button for both sign-in and account creation;
-the register page has none. The `/account` page has a Google
-sign-in link section for signed-in users.
+Google OAuth (`POST /api/auth/oauth/google/start`, `POST
+/api/auth/oauth/google/link/start`, `GET
+/api/auth/oauth/google/callback`) was implemented in migration
+0032 and removed by user decision on 2026-10-26: email + password
+is now the only sign-in path. Append-only migration 0047 drops
+the `oauth_identities` table and the `lookup_oauth_identity`
+function and removes the `oauth-start` / `oauth-callback`
+rate-limit scopes. The routes, provider code, sign-in button,
+and account-link section were deleted with the removal. No
+OAuth endpoints exist anymore; requests to the old paths 404.
 
 ### 2.3 Organizations and invitations
 
@@ -201,7 +171,7 @@ sign-in link section for signed-in users.
 | GET `/api/organizations` | List the caller's organizations. | Session, active membership |
 | POST `/api/organizations` | Create an organization; the creator becomes its owner member transactionally, with an audit record. | Session |
 | GET `/api/organizations/{organizationId}` | Organization detail. | Session, active membership |
-| PATCH `/api/organizations/{organizationId}` | Update organization name and/or slug, with the same validation as creation. Slug conflicts return 409 `SLUG_TAKEN`; a change writes an `organization.updated` audit record with previous and new values. A save with no changes succeeds and writes no audit row. Rate-limited (40 per user per hour, 80 per IP per hour, scope `organization-settings-user`). | Session, owner or admin |
+| PATCH `/api/organizations/{organizationId}` | Update organization name and/or slug, with the same validation as creation, and optionally `storageQuotaBytes` (positive integer up to 1 TiB, or `null` to clear the quota). Slug conflicts return 409 `SLUG_TAKEN`; a change writes an `organization.updated` audit record with previous and new values. A save with no changes succeeds and writes no audit row. Rate-limited (40 per user per hour, 80 per IP per hour, scope `organization-settings-user`). The response includes `storage_quota_bytes` and `storage_usage_bytes` (active file bytes across the workspace); GET returns the same two fields. NULL quota means no organization cap — per-task caps (20 files, 100 MB) still apply. Uploads and replacements over the quota return 409 `ORGANIZATION_STORAGE_LIMIT`. | Session, owner or admin |
 | DELETE `/api/organizations/{organizationId}` | Soft-delete the organization (see below). Body `{ slug }` must repeat the workspace's current slug as explicit confirmation; a mismatch returns 409 `ORGANIZATION_SLUG_MISMATCH`. Writes an `organization.deleted` audit record. Rate-limited (40 per user per hour, 80 per IP per hour, scope `organization-deletion-user`). | Session, owner only |
 | GET/POST `/api/organizations/{organizationId}/invitations` (and accept/revoke routes under `/api/invitations/`) | Create, accept, and revoke invitations. Acceptance requires an active, email-verified account matching the invited address, is single-use, and records membership and audit data transactionally. Replay is rejected. | Session; manager roles for create/revoke; invited user for accept |
 
@@ -289,7 +259,10 @@ list.
 
 | Method and path | Purpose |
 | --- | --- |
-| GET (notification list) and update (read/unread) under the organization/project routes | Recipient-scoped in-app notifications, with preferences. Emitters cover mentions, task assignment, and task/project/milestone changes and membership. Due-date and AI events, email delivery, and retry processing do not exist yet. |
+| GET (notification list) and update (read/unread) under the organization/project routes | Recipient-scoped in-app notifications, with preferences. Emitters cover mentions, task assignment, and task/project/milestone changes and membership. Due-date and AI events do not exist yet as emitters. |
+| GET/PATCH `/api/organizations/{organizationId}/notifications/preferences` | Per-event in-app preference (`inAppEnabled`, default true) and email preference (`emailEnabled`, default false, optional in PATCH — omitting it leaves the stored email preference unchanged). Email only takes effect when the operator also configured the event type (see below). |
+| GET `/api/organizations/{organizationId}/notifications/stream` | Per-organization, per-recipient SSE stream for `notification.created` only. Session cookie, no CORS; active organization membership required (non-member 403, deleted organization 404). Every row is filtered by the notifications table's FORCE RLS policy (recipient = caller, organization = current, project still accessible), so another user's notifications are never visible, even by guessing an id. First sends `hello` (`{ organizationId, latestCreatedAt }`), then replays missed notifications up to 200 for a returning client (last-event-id, `?since_id=`, or `?since=` ISO timestamp), or one `resync` event when further behind; a fresh client goes live-only. Heartbeat every 15 seconds, poll every 2 seconds. Event data is the recipient's own notification (`id`, `organizationId`, `projectId`, `eventType`, `title`, `body`, `href`, `createdAt`). Rate limit shares the realtime connection scope (120/hour per user). |
+| Notification email worker (no HTTP route) | Transactional outbox (migrations 0040–0043) + worker `npm run notifications:email-worker` (run every minute, `--limit` 1–100, default 20). The outbox row is written in the same transaction as the in-app notification; the worker claims (FOR UPDATE SKIP LOCKED), sends via SMTP, and marks sent/failed (backoff 5 minutes per attempt, failed after 5 attempts, stuck `processing` rows reset after 30 minutes). Policy is off by default: operator lists event types in `NEXORA_NOTIFICATION_EMAIL_TYPES`, and the recipient must enable email for that type. The worker fails closed when SMTP is unconfigured and leaves rows pending; it never marks a row sent without sending. |
 
 ### 2.7 Private task files
 
@@ -298,10 +271,10 @@ Base path:
 
 | Method and path | Purpose |
 | --- | --- |
-| GET (collection) | Active file metadata to a project reader: file ID, safe filename, MIME type, byte size, uploader display name, version, timestamps. Never a storage key or credential. |
-| POST (collection) | Upload raw file bytes. Requires work authorization, same origin, canonical `Content-Type`, percent-encoded `X-File-Name`, and an `Idempotency-Key`. Streams at most 10 MiB, then validates extension, declared MIME, and file signature/content before storing. At most 20 active files and 100 MiB per task. |
-| GET `/files/{fileId}` (no token) | Issues a five-minute relative signed URL to a project reader. |
-| GET (signed URL) | Returns the file as a download attachment. The HMAC claim binds organization, project, task, file, version, and original user; download rechecks membership, project access, file version and state, and SHA-256 integrity. Rate-limited. |
+| GET (collection) | Active file metadata to a project reader: file ID, safe filename, MIME type, byte size, uploader display name, scan status (`pending`, `clean`, `quarantined`), version, timestamps. Never a storage key or credential. |
+| POST (collection) | Upload raw file bytes. Requires work authorization, same origin, canonical `Content-Type`, percent-encoded `X-File-Name`, and an `Idempotency-Key`. Streams at most 10 MiB, then validates extension, declared MIME, and file signature/content before storing. At most 20 active files and 100 MiB per task. When a malware scanner is configured, the upload is scanned synchronously and recorded as `clean` or `quarantined` (infected, or scanner unavailable — fail closed); with no scanner configured it is recorded as `pending` (not scanned, never clean). |
+| GET `/files/{fileId}` (no token) | Issues a five-minute relative signed URL to a project reader. Refused with 409 `FILE_QUARANTINED` for a quarantined file. |
+| GET (signed URL) | Returns the file as a download attachment. The HMAC claim binds organization, project, task, file, version, and original user; download rechecks membership, project access, file version and state, and SHA-256 integrity. Rate-limited. Refused with 409 `FILE_QUARANTINED` for a quarantined file. |
 | PUT `/files/{fileId}` | Replaces content and metadata. Requires work authorization, same origin, and `If-Match` with the current version. Stale version returns 409; success increments the version and invalidates older signed links. |
 | DELETE `/files/{fileId}` | Soft-deletes immediately, revokes links. Purge after 30 days is by the operator-run cleanup command, not by this route. |
 

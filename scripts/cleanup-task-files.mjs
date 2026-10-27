@@ -1,8 +1,8 @@
 import { Pool } from "pg";
 import {
-  listStalePrivateFileKeys,
-  removePrivateFile,
-} from "../src/server/private-file-storage.ts";
+  listStaleObjectKeys,
+  removeObject,
+} from "../src/server/storage.ts";
 
 const connectionString = process.env.DATABASE_URL;
 if (!connectionString) throw new Error("DATABASE_URL must use the restricted Nexora runtime role");
@@ -64,7 +64,7 @@ try {
 
   if (dryRun) {
     const expiredFiles = await pool.query("SELECT storage_key FROM nexora.list_expired_task_files()");
-    const orphanCandidates = await listStalePrivateFileKeys(new Date(Date.now() - 24 * 60 * 60 * 1000));
+    const orphanCandidates = await listStaleObjectKeys(new Date(Date.now() - 24 * 60 * 60 * 1000));
     let orphanCount = 0;
     for (let offset = 0; offset < orphanCandidates.length; offset += 1000) {
       const batch = orphanCandidates.slice(offset, offset + 1000);
@@ -109,7 +109,7 @@ try {
     let purgedOrganizationFiles = 0;
     for (const row of purgedOrganizations.rows) {
       if (row.storage_key === null) continue;
-      await removePrivateFile(row.storage_key);
+      await removeObject(row.storage_key);
       purgedOrganizationFiles += 1;
     }
     console.log(
@@ -130,7 +130,7 @@ try {
     const purgedKeys = await pool.query("SELECT storage_key FROM nexora.purge_expired_projects()");
     let purgedProjectFiles = 0;
     for (const row of purgedKeys.rows) {
-      await removePrivateFile(row.storage_key);
+      await removeObject(row.storage_key);
       purgedProjectFiles += 1;
     }
     console.log(
@@ -164,11 +164,11 @@ try {
     const expired = await pool.query("SELECT storage_key FROM nexora.purge_expired_task_files()");
     let purged = 0;
     for (const row of expired.rows) {
-      await removePrivateFile(row.storage_key);
+      await removeObject(row.storage_key);
       purged += 1;
     }
 
-    const orphanCandidates = await listStalePrivateFileKeys(new Date(Date.now() - 24 * 60 * 60 * 1000));
+    const orphanCandidates = await listStaleObjectKeys(new Date(Date.now() - 24 * 60 * 60 * 1000));
     let orphans = 0;
     for (let offset = 0; offset < orphanCandidates.length; offset += 1000) {
       const batch = orphanCandidates.slice(offset, offset + 1000);
@@ -177,7 +177,7 @@ try {
         [batch],
       );
       for (const row of unreferenced.rows) {
-        await removePrivateFile(row.storage_key);
+        await removeObject(row.storage_key);
         orphans += 1;
       }
     }

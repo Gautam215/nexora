@@ -145,6 +145,45 @@ export async function listActiveSessions(userId: string): Promise<ListedSession[
   });
 }
 
+// Session rotation on privilege change (approved default, 2026-10-26).
+// There is deliberately no periodic rotation: a session token alone
+// never grants a role, and every request re-checks membership through
+// RLS/tenant context, so a role downgrade takes effect immediately
+// even without revocation. Revocation is defense-in-depth, and it is
+// the enforcement mechanism for disabling a member: a disabled member
+// must not keep a usable session.
+// - Organization membership: revoke when the new status is not
+//   active, or when the new role ranks below the previous role
+//   (owner > admin > member > guest). A re-enable alone does not
+//   revoke: sessions were already revoked at disable time.
+// - Project membership: revoke only when the new status is not
+//   active. A project role-only change does not revoke, because
+//   project authorization is re-checked on every request and the
+//   session itself carries no project role; revoking every session
+//   for a project role change would punish multi-tab users for no
+//   additional access-control gain.
+// - Password change keeps the current, provably-trusted session and
+//   revokes all others (see changePasswordAndRevokeOthers);
+//   unauthenticated password reset revokes all sessions.
+export function organizationRoleRank(role: string): number {
+  if (role === "owner") return 3;
+  if (role === "admin") return 2;
+  if (role === "member") return 1;
+  return 0;
+}
+
+export function shouldRevokeSessionsOnOrganizationChange(
+  previous: { role: string; status: string },
+  next: { role: string; status: string },
+): boolean {
+  if (next.status !== "active") return true;
+  return organizationRoleRank(next.role) < organizationRoleRank(previous.role);
+}
+
+export function shouldRevokeSessionsOnProjectChange(next: { status: string }): boolean {
+  return next.status !== "active";
+}
+
 // Revoke one session owned by this user. Returns false when the session
 // does not exist, is already revoked or expired, or belongs to another
 // user — those three cases are deliberately indistinguishable, so that

@@ -26,7 +26,8 @@ import {
   requestedPrivateFilename,
   type TaskFileRecord,
 } from "../../../../../../../../../../server/task-files.ts";
-import { readPrivateFile, removePrivateFile, writePrivateFile } from "../../../../../../../../../../server/private-file-storage.ts";
+import { readObject, removeObject, writeObject } from "../../../../../../../../../../server/storage.ts";
+import { scanFileForUpload } from "../../../../../../../../../../server/malware.ts";
 
 export const runtime = "nodejs";
 
@@ -52,7 +53,7 @@ async function readActiveFile(
   const result = await transaction.query<TaskFileRecord>(
     `SELECT id, organization_id, project_id, task_id, original_filename,
             mime_type, byte_size::text AS byte_size, sha256, storage_key,
-            uploaded_by_user_id, version, created_at, updated_at,
+            uploaded_by_user_id, scan_status, version, created_at, updated_at,
             deleted_at, deleted_by_user_id
      FROM nexora.task_files
      WHERE organization_id = $1 AND project_id = $2 AND task_id = $3
@@ -115,7 +116,8 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
           );
           const file = lockedFile.rows[0] ?? null;
           if (!file || file.version !== claims.version) return null;
-          const bytes = await readPrivateFile(file.storage_key, Number(file.byte_size));
+          if (file.scan_status === "quarantined") return { file, bytes: null as Buffer | null };
+          const bytes = await readObject(file.storage_key, Number(file.byte_size));
           const digest = createHash("sha256").update(bytes).digest("hex");
           if (!sameDigest(digest, file.sha256)) throw new Error("Private file integrity check failed");
           return { file, bytes };
@@ -123,6 +125,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
         "guest",
       );
       if (!authorized) return jsonError(request, 404, "FILE_NOT_FOUND", "This private file is no longer available.");
+      if (authorized.bytes === null) return jsonError(request, 409, "FILE_QUARANTINED", "This file is quarantined and cannot be downloaded.");
       const bytes = authorized.bytes;
       return new Response(bytes, {
         status: 200,
@@ -156,6 +159,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       "guest",
     );
     if (!result) return jsonError(request, 404, "FILE_NOT_FOUND", "File not found.");
+    if (result.scan_status === "quarantined") return jsonError(request, 409, "FILE_QUARANTINED", "This file is quarantined and cannot be downloaded.");
 
     const expiresAt = Math.floor(Date.now() / 1000) + PRIVATE_FILE_LINK_TTL_SECONDS;
     const signedToken = createPrivateFileToken({
@@ -221,7 +225,8 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
 
     const storageKey = randomUUID();
     const digest = createHash("sha256").update(body.bytes).digest("hex");
-    await writePrivateFile(storageKey, body.bytes);
+    await writeObject(storageKey, body.bytes);
+    const scanStatus = await scanFileForUpload(body.bytes);
     let stagedStorageKey: string | null = storageKey;
     try {
       const result = await withOrganizationContext(
@@ -248,18 +253,34 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
           if (Number(usage.rows[0]?.byte_count ?? 0) + body.bytes.byteLength > MAX_TASK_FILE_BYTES) {
             return { kind: "task_size_limit" as const };
           }
+          // Organization quota, excluding the file being
+          // replaced (its old bytes leave when the new ones land).
+          const orgQuota = await transaction.query<{ quota: string | null; used: string }>(
+            `SELECT organization.storage_quota_bytes::text AS quota,
+                    (SELECT COALESCE(sum(byte_size), 0)::text FROM nexora.task_files
+                     WHERE organization_id = $1 AND deleted_at IS NULL AND id <> $2) AS used
+             FROM nexora.organizations AS organization
+             WHERE organization.id = $1`,
+            [organizationId, fileId],
+          );
+          const quotaRow = orgQuota.rows[0];
+          if (quotaRow?.quota !== null && quotaRow?.quota !== undefined) {
+            if (Number(quotaRow.used ?? 0) + body.bytes.byteLength > Number(quotaRow.quota)) {
+              return { kind: "organization_storage_limit" as const };
+            }
+          }
           const updated = await transaction.query<TaskFileRecord>(
             `UPDATE nexora.task_files
              SET original_filename = $1, mime_type = $2, byte_size = $3,
-                 sha256 = $4, storage_key = $5, version = version + 1,
+                 sha256 = $4, storage_key = $5, scan_status = $6, version = version + 1,
                  updated_at = pg_catalog.now()
-             WHERE organization_id = $6 AND project_id = $7 AND task_id = $8
-               AND id = $9 AND deleted_at IS NULL AND version = $10
+             WHERE organization_id = $7 AND project_id = $8 AND task_id = $9
+               AND id = $10 AND deleted_at IS NULL AND version = $11
              RETURNING id, organization_id, project_id, task_id, original_filename,
                        mime_type, byte_size::text AS byte_size, sha256, storage_key,
-                       uploaded_by_user_id, version, created_at, updated_at,
+                       uploaded_by_user_id, scan_status, version, created_at, updated_at,
                        deleted_at, deleted_by_user_id`,
-            [validation.filename, validation.mimeType, body.bytes.byteLength, digest, storageKey,
+            [validation.filename, validation.mimeType, body.bytes.byteLength, digest, storageKey, scanStatus,
               organizationId, projectId, taskId, fileId, expectedVersion],
           );
           const file = updated.rows[0];
@@ -288,7 +309,7 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
       );
 
       if (result.kind !== "replaced") {
-        await removePrivateFile(storageKey);
+        await removeObject(storageKey);
         stagedStorageKey = null;
       }
       if (result.kind === "not_found" || result.kind === "file_not_found") return jsonError(request, 404, "FILE_NOT_FOUND", "File not found.");
@@ -297,13 +318,14 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
       }
       if (result.kind === "version_conflict") return jsonError(request, 409, "FILE_VERSION_CONFLICT", "This file changed elsewhere. Reload before replacing it.");
       if (result.kind === "task_size_limit") return jsonError(request, 409, "TASK_FILE_STORAGE_LIMIT", "A task can use at most 100 MB of active files.");
+      if (result.kind === "organization_storage_limit") return jsonError(request, 409, "ORGANIZATION_STORAGE_LIMIT", "This workspace has reached its storage quota.");
       if (result.kind !== "replaced") return jsonError(request, 500, "INTERNAL_ERROR", "Unable to complete that request right now.");
-      await removePrivateFile(result.oldStorageKey).catch(() => undefined);
+      await removeObject(result.oldStorageKey).catch(() => undefined);
       stagedStorageKey = null;
       return jsonOk(request, { file: result.file });
     } catch (error) {
       if (stagedStorageKey && !(error instanceof TransactionCommitOutcomeUnknown)) {
-        await removePrivateFile(stagedStorageKey).catch(() => undefined);
+        await removeObject(stagedStorageKey).catch(() => undefined);
       }
       throw error;
     }

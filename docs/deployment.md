@@ -37,8 +37,7 @@ Never commit a real value, and never commit `.env.local`.
 | `NEXORA_PRIVATE_FILE_DIR` | Yes | Absolute, private, persistent directory. Never under `public/`. |
 | `NEXORA_TRUSTED_CLIENT_IP_HEADER` | Recommended | A header your trusted ingress overwrites with one client IP. Leave blank only when there is no ingress; never trust a client-supplied forwarding chain. When it is set and a request lacks it, rate limiting fails closed with 503. |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_REQUIRE_TLS`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Yes | Verification and recovery email. Missing or broken SMTP fails closed with 503 on the routes that need it; it does not silently degrade. |
-| `OAUTH_GOOGLE_ENABLED` | No | `false` by default. Set `true` only with the three values below. |
-| `OAUTH_GOOGLE_CLIENT_ID`, `OAUTH_GOOGLE_CLIENT_SECRET`, `OAUTH_FLOW_SIGNING_KEY` | With OAuth | Secret and flow key are server-only, at least 32 bytes. The authorize/token/JWKS URLs default to Google's and can be overridden with `OAUTH_GOOGLE_AUTHORIZE_URL`, `OAUTH_GOOGLE_TOKEN_URL`, `OAUTH_GOOGLE_JWKS_URL` (only for a compatible IdP in tests). |
+| Google OAuth | Removed | Removed 2026-10-26 (migration 0047, user decision: email + password only). No OAuth variables are read anymore. |
 | `NEXORA_METRICS_TOKEN` | Recommended | Long random value, sent as `x-nexora-metrics-token`. Blank or unset means `GET /api/metrics` fails closed with 503. |
 | `AI_PROVIDER`, `AI_PROVIDER_BASE_URL`, `AI_PROVIDER_API_KEY`, `AI_PROVIDER_MODEL` | No | Unset (or anything other than `http`/`mock`) means AI endpoints fail closed with 503 `AI_UNAVAILABLE`. `mock` is a deterministic test double and is refused in production. `http` uses a generic OpenAI-compatible chat-completions endpoint; the key is server-only and never logged. |
 
@@ -175,22 +174,63 @@ choices:
 - **Alert channel:** an external monitor scraping `/api/metrics`
   (alert on 5xx rate and `database.up` false) plus the structured
   failure logs. Needs an email address or webhook.
-- **Notification email:** the PRD explicitly defers it ("design the
+- **Notification email — IMPLEMENTED 2026-10-26 under the
+  user-approved default:** the PRD explicitly defers it ("design the
   architecture so email notifications can be added safely later").
-  Recommended shape when it is wanted: a database outbox written in
-  the same transaction as the notification, plus a worker that sends
-  and marks, so a failed send retries instead of vanishing. Needs a
-  decision on which notification types get email.
-- **Session rotation:** the PRD names it once with no
-  policy/trigger/interval. Recommended: rotate on privilege change
-  (password change already revokes other sessions; role changes
-  should do the same), not on a timer — timer rotation costs users
-  sessions without a clear security gain. Needs the user's policy
-  choice before any implementation.
-- **Notification stream delivery:** `notification.created` over SSE
-  needs a user-level channel decision (a per-user stream, or
-  recipient-filtered project-stream events). Until then,
-  notifications are delivered through the notification centre.
+  Implemented shape: a database outbox written in the same
+  transaction as the notification (migrations 0040–0043), plus a
+  worker (`npm run notifications:email-worker`, run every minute)
+  that claims, sends, and marks, with 5-minute-per-attempt backoff
+  and failure after 5 attempts. Email is off by default and opt-in
+  twice over: the operator must list event types in
+  `NEXORA_NOTIFICATION_EMAIL_TYPES`, and the recipient must enable
+  email for that type in preferences (`email_enabled`, default
+  false). The worker fails closed when SMTP is unconfigured and
+  leaves rows pending. Two defects found and fixed in this work:
+  FORCE RLS on the outbox table blocked SECURITY DEFINER functions
+  (0041), and the outbox enqueue's notification SELECT hit the
+  notifications table's FORCE-RLS recipient-only select policy, so
+  an actor could not verify their own notification (0043: the
+  check now uses org membership, and the outbox FK to
+  notifications(id) is the existence check).
+- **Session rotation — IMPLEMENTED 2026-10-26 under the
+  user-approved default:** rotate on privilege change, not on a
+  timer — timer rotation costs users sessions without a clear
+  security gain. See ARCHITECTURE.md §7 and migration 0039.
+- **Notification stream delivery — IMPLEMENTED 2026-10-26 under
+  the user-approved default:** `notification.created` over SSE on
+  a per-organization, per-recipient channel
+  (`GET /api/organizations/{id}/notifications/stream`), not on
+  project streams. A global per-user stream was rejected because
+  it would need a recipient-only policy that bypasses the
+  project-access check and would leak old notifications after a
+  project removal; the per-org channel reuses the notifications
+  table's FORCE RLS policy (recipient + organization + project
+  still accessible), so another user's notifications are never
+  visible, even by guessing an id.
+- **Shared storage — abstraction IMPLEMENTED 2026-10-26, live S3
+  NOT verified:** all file routes and the cleanup script go
+  through `src/server/storage.ts` (`NEXORA_STORAGE_PROVIDER`:
+  `local` default, `s3` S3-compatible via fetch + SigV4, no SDK).
+  Switching providers in production is a copy-then-verify
+  migration, not a flag flip: copy every `<uuid>.blob` object to
+  the new store, verify byte counts and SHA-256 hashes against
+  `task_files`, keep the old store read-only until the new store
+  serves a full cleanup + download check, and only then switch
+  the provider variable. The `s3` adapter has unit tests against
+  a fake HTTP server only; do not claim live S3 integration until
+  that migration has actually run against a real endpoint.
+- **Malware scanning — abstraction IMPLEMENTED 2026-10-26, live
+  ClamAV NOT verified:** `src/server/malware.ts` speaks clamd
+  INSTREAM over TCP (no SDK); uploads are scanned synchronously
+  and recorded as `clean`, `quarantined` (infected or scanner
+  unavailable — fail closed), or `pending` (no scanner
+  configured). Quarantined files are never downloadable (409
+  FILE_QUARANTINED, including for signed links). Do not claim
+  malware protection is operational until a real clamd is
+  configured and `scripts/rescan-task-files.mjs` has cleared the
+  pending/quarantined backlog; the ClamAV adapter is unit-tested
+  against a fake clamd only.
 - **Organization storage budgets:** upload caps exist per task
   (10 MB/file, 20 files, 100 MB/task); organization-level budgets and
   usage tracking need budget numbers before implementation.

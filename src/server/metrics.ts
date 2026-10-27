@@ -17,7 +17,7 @@ import "server-only";
 // - Counters are process-local. On a multi-instance deployment each
 //   instance reports its own counters; an external monitor aggregates
 //   them. Nothing here pretends to be a global view.
-// - OAuth 302 redirects bypass the JSON helpers and are not counted;
+// - Redirects bypass the JSON helpers and are not counted;
 //   their failures are still covered by the structured failure logs.
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -52,6 +52,28 @@ let realtimeConnectionsCurrent = 0;
 let realtimeConnectionsTotal = 0;
 let realtimeEventsPublished = 0;
 let realtimeEventsDelivered = 0;
+
+// Notification-stream counters are separate from project-stream
+// counters, so a monitor can tell the two channels apart. They
+// count the same thing as the realtime counters (connections at
+// accept/close, events enqueued to a stream controller, not client
+// acknowledgements — SSE has none).
+let notificationConnectionsCurrent = 0;
+let notificationConnectionsTotal = 0;
+let notificationEventsDelivered = 0;
+
+export function recordNotificationConnect(): void {
+  notificationConnectionsCurrent += 1;
+  notificationConnectionsTotal += 1;
+}
+
+export function recordNotificationDisconnect(): void {
+  notificationConnectionsCurrent = Math.max(0, notificationConnectionsCurrent - 1);
+}
+
+export function recordNotificationDelivered(count = 1): void {
+  notificationEventsDelivered += count;
+}
 
 export function recordRealtimeConnect(): void {
   realtimeConnectionsCurrent += 1;
@@ -119,6 +141,11 @@ export interface MetricsSnapshot {
     eventsPublished: number;
     eventsDelivered: number;
   };
+  notifications: {
+    connectionsCurrent: number;
+    connectionsTotal: number;
+    eventsDelivered: number;
+  };
   paths: { path: string; count: number; success: number; clientError: number; serverError: number }[];
   failuresByOperation: { operation: string; count: number }[];
 }
@@ -132,6 +159,11 @@ export function snapshotMetrics(): MetricsSnapshot {
       connectionsTotal: realtimeConnectionsTotal,
       eventsPublished: realtimeEventsPublished,
       eventsDelivered: realtimeEventsDelivered,
+    },
+    notifications: {
+      connectionsCurrent: notificationConnectionsCurrent,
+      connectionsTotal: notificationConnectionsTotal,
+      eventsDelivered: notificationEventsDelivered,
     },
     paths: [...paths.entries()]
       .map(([path, stats]) => ({ path, ...stats }))

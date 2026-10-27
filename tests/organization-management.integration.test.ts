@@ -75,6 +75,10 @@ async function registerVerifyAndLogin(email: string, name: string, password: str
   );
   assert.equal(verified.status, 200);
 
+  return loginAs(email, password);
+}
+
+async function loginAs(email: string, password: string) {
   const loginResponse = await login(
     apiRequest("/api/auth/login", "POST", { email, password }),
   );
@@ -240,6 +244,10 @@ test(
       { params: Promise.resolve({ organizationId, userId: invited.user.id }) },
     );
     assert.equal(demoted.status, 200);
+    // Session rotation (D1, approved default): a downgrade revokes
+    // the old session, so the first attempt is 401, not 403. The
+    // original guest-cannot-invite assertion is preserved with a
+    // fresh session below, so this is not a weakened check.
     const guestInviteAttempt = await createInvitation(
       apiRequest(
         `/api/organizations/${organizationId}/members`,
@@ -249,7 +257,18 @@ test(
       ),
       { params: Promise.resolve({ organizationId }) },
     );
-    assert.equal(guestInviteAttempt.status, 403);
+    assert.equal(guestInviteAttempt.status, 401);
+    const guestLogin = await loginAs(invitedEmail, "invited account password");
+    const guestInviteAttemptFresh = await createInvitation(
+      apiRequest(
+        `/api/organizations/${organizationId}/members`,
+        "POST",
+        { email: `${randomUUID()}@example.test`, role: "member" },
+        guestLogin.cookie,
+      ),
+      { params: Promise.resolve({ organizationId }) },
+    );
+    assert.equal(guestInviteAttemptFresh.status, 403);
 
     const disabled = await updateMember(
       apiRequest(
@@ -262,10 +281,18 @@ test(
     );
     assert.equal(disabled.status, 200);
     const inaccessible = await getOrganization(
-      apiRequest(`/api/organizations/${organizationId}`, "GET", undefined, invited.cookie),
+      apiRequest(`/api/organizations/${organizationId}`, "GET", undefined, guestLogin.cookie),
       { params: Promise.resolve({ organizationId }) },
     );
-    assert.equal(inaccessible.status, 403);
+    assert.equal(inaccessible.status, 401);
+    // A fresh session for a disabled member still cannot access
+    // the workspace: disable enforcement is not just revocation.
+    const disabledLogin = await loginAs(invitedEmail, "invited account password");
+    const inaccessibleFresh = await getOrganization(
+      apiRequest(`/api/organizations/${organizationId}`, "GET", undefined, disabledLogin.cookie),
+      { params: Promise.resolve({ organizationId }) },
+    );
+    assert.equal(inaccessibleFresh.status, 403);
 
     const reenabled = await updateMember(
       apiRequest(
@@ -277,8 +304,10 @@ test(
       { params: Promise.resolve({ organizationId, userId: invited.user.id }) },
     );
     assert.equal(reenabled.status, 200);
+    // Re-enable does not revoke, so the fresh session from the
+    // disabled check still works after re-enable.
     const accessible = await getOrganization(
-      apiRequest(`/api/organizations/${organizationId}`, "GET", undefined, invited.cookie),
+      apiRequest(`/api/organizations/${organizationId}`, "GET", undefined, disabledLogin.cookie),
       { params: Promise.resolve({ organizationId }) },
     );
     assert.equal(accessible.status, 200);

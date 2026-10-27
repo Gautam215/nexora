@@ -15,7 +15,7 @@ import "server-only";
 //   no vendor SDK is added, so no new dependency is introduced.
 // - Anything else, or missing credentials: resolveAiProvider()
 //   returns null and the route fails closed with 503 AI_UNAVAILABLE,
-//   mirroring the email/OAuth configuration pattern. Missing
+//   mirroring the email configuration pattern. Missing
 //   credentials never prevent the rest of the app from running, and
 //   no route fabricates an AI answer when no provider is configured.
 //
@@ -129,9 +129,24 @@ class HttpAiProvider implements AiProvider {
   }
 
   async generate(input: AiGenerateInput): Promise<AiGenerateOutput> {
-    let response: Response;
-    try {
-      response = await fetch(`${this.baseUrl}/chat/completions`, {
+    // Bounded retry for transient provider failures only (429 and
+    // 502/503/504): one retry, with a short backoff honouring
+    // Retry-After up to 5 seconds. Generation is effect-free in
+    // Nexora (no state is written until a successful result
+    // returns), so a retry cannot duplicate a Nexora record; it
+    // can only spend provider tokens twice, which the one-retry
+    // bound keeps small. Timeouts and network errors are NOT
+    // retried: a generation that timed out may still be running
+    // provider-side, and retrying it would stack two long
+    // generations. No circuit breaker is added: with one retry
+    // and a 30-second timeout, a failing provider already fails
+    // closed fast, and a breaker would need shared state across
+    // processes that this codebase does not have.
+    const RETRYABLE = new Set([429, 502, 503, 504]);
+    let response: Response | null = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        response = await fetch(`${this.baseUrl}/chat/completions`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -154,7 +169,15 @@ class HttpAiProvider implements AiProvider {
       }
       throw new AiProviderError("PROVIDER_REJECTED");
     }
-    if (!response.ok) {
+      if (response.ok) break;
+      if (!RETRYABLE.has(response.status) || attempt === 1) {
+        throw new AiProviderError("PROVIDER_REJECTED");
+      }
+      const retryAfter = Number(response.headers.get("retry-after"));
+      const backoffMs = Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 5000) : 500;
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    }
+    if (!response || !response.ok) {
       throw new AiProviderError("PROVIDER_REJECTED");
     }
     const body = (await response.json()) as {

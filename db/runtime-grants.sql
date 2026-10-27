@@ -69,21 +69,17 @@ GRANT SELECT (id, email, display_name, status, email_verified_at, created_at, up
   UPDATE (display_name, password_hash)
 ON TABLE nexora.users TO nexora_app;
 
-GRANT SELECT (id, user_id, provider, provider_subject, provider_email, created_at, last_used_at),
-  INSERT (id, user_id, provider, provider_subject, provider_email),
-  UPDATE (provider_email, last_used_at)
-ON TABLE nexora.oauth_identities TO nexora_app;
-
-GRANT EXECUTE ON FUNCTION nexora.lookup_oauth_identity(text, text) TO nexora_app;
+GRANT EXECUTE ON FUNCTION nexora.revoke_user_sessions_for_org_privilege_change(uuid, uuid) TO nexora_app;
+GRANT EXECUTE ON FUNCTION nexora.revoke_user_sessions_for_project_privilege_change(uuid, uuid, uuid) TO nexora_app;
 
 GRANT SELECT (id, user_id, created_at, last_seen_at, expires_at, revoked_at),
   INSERT (id, user_id, token_hash, expires_at),
   UPDATE (last_seen_at, revoked_at)
 ON TABLE nexora.user_sessions TO nexora_app;
 
-GRANT SELECT (id, name, slug, status, created_by, created_at, updated_at),
+GRANT SELECT (id, name, slug, status, storage_quota_bytes, created_by, created_at, updated_at),
   INSERT (id, name, slug, created_by),
-  UPDATE (name, slug, status, deleted_at, deleted_by_user_id, purged_at)
+  UPDATE (name, slug, status, storage_quota_bytes, deleted_at, deleted_by_user_id, purged_at)
 ON TABLE nexora.organizations TO nexora_app;
 
 GRANT SELECT (organization_id, user_id, role, status, invited_by, joined_at, created_at, updated_at),
@@ -192,10 +188,16 @@ GRANT SELECT (
   INSERT (organization_id, project_id, task_id, comment_id, mentioned_user_id)
 ON TABLE nexora.task_comment_mentions TO nexora_app;
 
-GRANT SELECT (organization_id, user_id, event_type, in_app_enabled, updated_at),
-  INSERT (organization_id, user_id, event_type, in_app_enabled),
-  UPDATE (in_app_enabled, updated_at)
+GRANT SELECT (organization_id, user_id, event_type, in_app_enabled, email_enabled, updated_at),
+  INSERT (organization_id, user_id, event_type, in_app_enabled, email_enabled),
+  UPDATE (in_app_enabled, email_enabled, updated_at)
 ON TABLE nexora.notification_preferences TO nexora_app;
+GRANT EXECUTE ON FUNCTION nexora.notification_email_enabled(uuid, uuid, text) TO nexora_app;
+GRANT EXECUTE ON FUNCTION nexora.enqueue_notification_email_outbox(uuid, uuid, uuid, text, text, text, text) TO nexora_app;
+GRANT EXECUTE ON FUNCTION nexora.claim_notification_email_outbox(integer) TO nexora_app;
+GRANT EXECUTE ON FUNCTION nexora.mark_notification_email_sent(uuid) TO nexora_app;
+GRANT EXECUTE ON FUNCTION nexora.mark_notification_email_failed(uuid, boolean) TO nexora_app;
+GRANT EXECUTE ON FUNCTION nexora.reset_stuck_notification_email_outbox() TO nexora_app;
 
 GRANT SELECT (
     id, organization_id, project_id, recipient_user_id, actor_user_id,
@@ -229,15 +231,15 @@ ON TABLE nexora.realtime_events TO nexora_app;
 
 GRANT SELECT (
     id, organization_id, project_id, task_id, original_filename, mime_type,
-    byte_size, sha256, storage_key, uploaded_by_user_id, version,
+    byte_size, sha256, storage_key, uploaded_by_user_id, scan_status, version,
     created_at, updated_at, deleted_at, deleted_by_user_id
   ),
   INSERT (
     id, organization_id, project_id, task_id, original_filename, mime_type,
-    byte_size, sha256, storage_key, uploaded_by_user_id
+    byte_size, sha256, storage_key, uploaded_by_user_id, scan_status
   ),
   UPDATE (
-    original_filename, mime_type, byte_size, sha256, storage_key,
+    original_filename, mime_type, byte_size, sha256, storage_key, scan_status,
     version, updated_at, deleted_at, deleted_by_user_id
   )
 ON TABLE nexora.task_files TO nexora_app;

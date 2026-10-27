@@ -85,10 +85,20 @@ export const organizationUpdateSchema = z
       .max(63)
       .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
       .optional(),
+    // Per-organization storage quota in bytes. Null clears the
+    // quota (no organization cap; per-task caps still apply).
+    // No product quota value is invented: this is a configuration
+    // an owner or admin sets explicitly. 1 TiB is a schema guard
+    // against nonsense values, not a recommended quota.
+    storageQuotaBytes: z.number().int().positive().max(1099511627776).nullable().optional(),
   })
-  .refine((value) => value.name !== undefined || value.slug !== undefined, {
-    message: "At least one organization field must be changed.",
-  });
+  .refine(
+    (value) =>
+      value.name !== undefined || value.slug !== undefined || value.storageQuotaBytes !== undefined,
+    {
+      message: "At least one organization field must be changed.",
+    },
+  );
 
 export const organizationInvitationCreateSchema = z.strictObject({
   email,

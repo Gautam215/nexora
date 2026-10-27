@@ -8,7 +8,10 @@ import {
   jsonServerFailure,
   parseJson,
 } from "../../../../../../server/api.ts";
-import { getAuthPrincipal } from "../../../../../../server/auth.ts";
+import {
+  getAuthPrincipal,
+  shouldRevokeSessionsOnOrganizationChange,
+} from "../../../../../../server/auth.ts";
 import { isRateLimited } from "../../../../../../server/auth-rate-limit.ts";
 import { withOrganizationContext } from "../../../../../../server/db.ts";
 
@@ -77,6 +80,19 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
         );
         const membership = result.rows[0];
         if (!membership) return null;
+        let sessionsRevoked = 0;
+        if (
+          shouldRevokeSessionsOnOrganizationChange(previous, {
+            role: membership.role,
+            status: membership.status,
+          })
+        ) {
+          const revoked = await transaction.query<{ revoked_count: number }>(
+            `SELECT nexora.revoke_user_sessions_for_org_privilege_change($1, $2) AS revoked_count`,
+            [organizationId, userId],
+          );
+          sessionsRevoked = revoked.rows[0]?.revoked_count ?? 0;
+        }
         await transaction.query(
           `INSERT INTO nexora.audit_events
              (id, organization_id, actor_user_id, action, target_type, target_id, details)
@@ -91,10 +107,11 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
               role: membership.role,
               previousStatus: previous.status,
               status: membership.status,
+              sessionsRevoked,
             }),
           ],
         );
-        return membership;
+        return { ...membership, sessionsRevoked };
       },
       "admin",
     );

@@ -220,6 +220,26 @@ this plan's phases and must not be retried by working around that block.
      Google verification is still blocked: no Google client
      credentials exist, so no real Google sign-in has been
      exercised.
+     **Removed 2026-10-26 (local, unpushed, user decision: "Sirf
+     email/password rakho"):** Google OAuth deleted outright —
+     routes (`src/app/api/auth/oauth/google/*`), provider code
+     (`src/server/oauth/`, `src/security/oauth-errors.ts`),
+     `lookupOAuthIdentity` in `src/server/db.ts`, the sign-in
+     Google button, the `/account` link section, and the OAuth
+     tests (`tests/oauth-google.test.ts`,
+     `tests/oauth-google.integration.test.ts`) are gone; the
+     migration-guards OAuth test is replaced by a 0047 removal
+     guard. Append-only migration 0047 drops
+     `nexora.oauth_identities` and `nexora.lookup_oauth_identity`,
+     deletes leftover `oauth-start` / `oauth-callback` buckets,
+     and removes those scopes from both allowlists (0036's lists
+     verbatim otherwise); `db/runtime-grants.sql` loses the OAuth
+     grants. `users.password_hash` stays nullable for migration
+     safety (see ARCHITECTURE.md 7.1). Docs updated in the same
+     change: ARCHITECTURE.md 7.1, API.md 2.2a, DATABASE.md,
+     docs/deployment.md, `.env.example`, and
+     docs/prd-traceability.md section 5. Email + password is now
+     the only sign-in path; no OAuth credentials are needed.
 - **Files or modules likely affected:** `src/server/auth.ts`,
   `src/security/password.ts`, `src/security/auth-schemas.ts`,
   `src/app/api/auth/*`, `src/app/components/auth-page.tsx`, a new
@@ -471,9 +491,16 @@ this plan's phases and must not be retried by working around that block.
      producers wired after commit for task.created, task.updated,
      task.deleted (archive), comment.created, project.updated, each
      with publish failures logged, never failing the mutation.
-     NOT built: notification.created — notifications have their own
-     centre and delivery over a stream needs a user-level channel
-     decision; documented future work, not claimed.
+     **Implemented 2026-10-26 under the user-approved default:**
+     notification.created on a separate per-organization,
+     per-recipient SSE channel
+     (`GET /api/organizations/{id}/notifications/stream`,
+     `src/server/notifications/user-stream.ts`), not on project
+     streams and not as a global per-user stream (rejected: it
+     would bypass the project-access check). Verified by
+     `tests/notification-stream.integration.test.ts` (recipient
+     delivery, replay isolation for another member, anonymous
+     401, non-member 403).
      **Implemented 2026-10-26 (local, unpushed; presence):**
      `presence.changed` as ephemeral roster state from an
      in-process registry (`src/server/realtime/presence.ts`), sent
@@ -658,37 +685,82 @@ this plan's phases and must not be retried by working around that block.
 
 ## Open decisions (genuinely need the user; not invented here)
 
-- **Session rotation (PRD §5.1).** The PRD names "Session rotation"
-  exactly once, in a feature list, with no policy: no trigger, no
-  interval, no acceptance criterion, and no design in ARCHITECTURE.md.
-  What already exists: a fresh opaque token per login, 14-day expiry,
-  revoke-all-others on password change, and the /account session list
-  with per-session and revoke-all revocation. Deciding rotation means
-  choosing a trigger (every request, periodic sliding refresh,
-  privilege change, or login only — login-only rotation already
-  exists) and each choice changes security behaviour and the
-  multi-tab experience, so it is not a routine decision. Blocked on
-  the user's policy choice.
-- **Email delivery for notifications (PRD §13).** The PRD requires
-  in-app notifications (implemented: recipient-scoped read/unread,
-  preferences, deduplication, mention/assignment/change/membership
-  emitters) and explicitly defers email with "design the architecture
-  so email notifications can be added safely later." Sending email
-  from the emitters needs a delivery design first: synchronous sends
-  would slow every mutation request and fail it on SMTP failure;
-  the durable alternative (outbox table + worker, or an external
-  provider) is a new subsystem with no design in ARCHITECTURE.md and
-  no queue/worker infrastructure in the app. Due-date notifications
-  additionally need a scheduler (same blocked class as cleanup
-  scheduling: no production environment), and AI workflow-completion
-  notifications need the AI pillars. Blocked on the user's delivery
-  design choice.
+- **Session rotation (PRD §5.1) — IMPLEMENTED 2026-10-26 under the
+  user-approved default.** The PRD names "Session rotation" exactly
+  once, in a feature list, with no policy. Approved default: no
+  periodic rotation; rotate/invalidate on privilege change and
+  other security-sensitive events. Organization downgrade/disable
+  and project disable revoke all target sessions in the same
+  transaction (migration 0039, SECURITY DEFINER functions, owner
+  targets refused); project role-only change does not revoke, for
+  the per-request authorization reason documented in
+  ARCHITECTURE.md §7. Password change already revoked all other
+  sessions and keeps the current trusted session; password reset
+  revokes all sessions. Verified by unit tests
+  (`tests/session-rotation.test.ts`) and an integration test
+  (`tests/session-privilege-rotation.integration.test.ts`), plus
+  updated organization/project-management tests that preserve the
+  original 403/404 assertions with fresh sessions after revocation.
+- **Email delivery for notifications (PRD §13) — IMPLEMENTED
+  2026-10-26 under the user-approved default.** In-app notifications
+  already existed (recipient-scoped read/unread, preferences,
+  deduplication, mention/assignment/change/membership emitters).
+  Email is now a transactional outbox (migrations 0040–0043) plus a
+  background worker (`scripts/notification-email-worker.mjs`,
+  `npm run notifications:email-worker`): the outbox row is written
+  in the same transaction as the notification, the worker claims
+  (FOR UPDATE SKIP LOCKED), sends, and marks, with backoff and
+  failure after 5 attempts, and fails closed when SMTP is
+  unconfigured. Policy is off by default and opt-in twice over:
+  operator lists event types in
+  `NEXORA_NOTIFICATION_EMAIL_TYPES`, and the recipient enables
+  email for that type (`email_enabled`, default false, in
+  notification preferences). Due-date notifications still need a
+  scheduler (no production environment), which is a separate
+  blocked item, not a gap in the outbox itself. Verified by
+  `tests/notification-email-outbox.integration.test.ts` (default
+  off, opt-in once, policy-off stops email).
 - **Alert channel (Phase 4 item 4).** Metrics exist and an external
   monitor can scrape `/api/metrics` today; the in-app alert channel
   (email address or webhook) is the user's choice.
 - **Shared object storage (Phase 4 item 2) and malware scanning
-  (item 3).** Both need an external-service choice plus credentials;
-  no SDK is added without a design in ARCHITECTURE.md.
+  (item 3) — ABSTRACTIONS IMPLEMENTED 2026-10-26 under the
+  user-approved defaults, live integrations NOT verified.**
+  Storage: `src/server/storage.ts` (local default; S3-compatible
+  via fetch + SigV4, no SDK; presigned downloads; fail closed on
+  incomplete config; copy-then-verify migration documented in
+  `docs/deployment.md`). Malware: `src/server/malware.ts`
+  (clamd INSTREAM, no SDK; synchronous scan at upload;
+  `clean` / `quarantined` (infected or scanner unavailable) /
+  `pending` (no scanner configured, never clean); downloads
+  blocked with 409 `FILE_QUARANTINED`; rescan script for pending
+  and quarantined files). Both are unit/integration-tested
+  against fake servers only; do not claim live S3 or live
+  ClamAV until a real endpoint is configured and verified.
+- **Notification stream delivery — IMPLEMENTED 2026-10-26 under
+  the user-approved default.** Per-organization, per-recipient
+  SSE channel (`GET /api/organizations/{id}/notifications/stream`),
+  not a global per-user stream (rejected: it would bypass the
+  project-access check) and not on project streams. Isolation
+  rests on the notifications table's FORCE RLS policy.
+- **Organization storage budgets — IMPLEMENTED 2026-10-26 under
+  the user-approved default.** Configurable per-organization
+  quota (`storage_quota_bytes`, migration 0046, NULL = no cap),
+  set by owner/admin via PATCH, enforced in upload and replace
+  transactions (409 `ORGANIZATION_STORAGE_LIMIT`). No production
+  quota VALUE is invented: the actual numbers remain a product
+  decision for the user.
+- **Accessibility, performance, reliability — LOCAL WORK
+  IMPLEMENTED 2026-10-26 under the user-approved default.**
+  Palette contrast verified AA (DESIGN.md §2.1a, test-enforced);
+  every form control is label-wrapped or aria-labelled
+  (test-enforced); a benchmark script and a local baseline exist
+  (`docs/performance.md`); timeouts already existed for DB,
+  SMTP, AI, S3, and ClamAV, and the AI provider gained one
+  bounded retry for transient 429/502/503/504 only. Production
+  acceptance (keyboard/screen-reader pass on a deployed app,
+  realistic-dataset benchmarks, alert channel) remains
+  outstanding and is not claimed.
 - **AI (PRD 17–22, 24) and realtime (PRD 25).** No design yet; need
   user decisions and no new SDK dependencies without one.
 

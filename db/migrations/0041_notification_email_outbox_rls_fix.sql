@@ -1,0 +1,12 @@
+-- Correction to 0040: 0040 enabled FORCE ROW LEVEL SECURITY on
+-- nexora.notification_email_outbox with no policies. FORCE RLS
+-- applies even to the table owner, so the SECURITY DEFINER outbox
+-- functions (which run as the migrator/owner) were denied with
+-- 42501 on every enqueue, even though their authorization checks
+-- passed. 0040 itself is immutable and is left untouched; this
+-- migration removes FORCE while keeping RLS enabled. With RLS
+-- enabled but no policies, direct app-role access is still denied
+-- (no policy passes), while SECURITY DEFINER functions run as the
+-- owner and bypass RLS, which is exactly the intended outbox
+-- access path (server enqueue + worker claim/mark only).
+ALTER TABLE nexora.notification_email_outbox NO FORCE ROW LEVEL SECURITY;

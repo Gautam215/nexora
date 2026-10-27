@@ -60,6 +60,32 @@ Supporting rules:
 
 - Text on a surface is foreground for primary content and muted for secondary
   content only. Do not introduce a third text colour for decoration.
+
+### 2.1a Accessibility (measured 2026-10-26, static checks only)
+
+Contrast (WCAG AA for normal text is 4.5:1; verified by
+`tests/accessibility.test.ts`, which fails if a pair drops
+below it):
+
+| Pair | Ratio |
+| --- | --- |
+| Foreground `#f2f3f4` on background `#111315` | 16.76:1 |
+| Foreground on surface `#191c1f` | 15.40:1 |
+| Muted `#a1a6aa` on background | 7.58:1 |
+| Muted on surface | 6.97:1 |
+| Accent `#a9c2b0` on background | 9.78:1 |
+
+All pairs pass AA. Muted on surface (6.97:1) passes AA but not
+AAA (7:1) — do not use muted text for anything smaller or
+lighter than the current body sizes without re-measuring.
+
+Form controls: every control in `src/app/components/` is either
+wrapped in a `<label>` or carries an `aria-label` (verified by
+the same test file; hidden inputs are exempt). Focus is visible
+via `:focus-visible` in `globals.css`. These static checks do
+not prove WCAG conformance: a keyboard and screen-reader pass
+on the deployed app is still outstanding, and is recorded as
+such — do not claim it until it has actually run.
 - Status is conveyed by text first, then by a small shape or label — never by
   colour alone. Project health, task status, and membership status always have
   a readable label.

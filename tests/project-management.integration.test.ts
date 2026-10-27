@@ -1326,11 +1326,26 @@ test(
       { params: Promise.resolve({ organizationId, projectId, userId: member.userId }) },
     );
     assert.equal(disabled.status, 200);
+    // Session rotation (D1, approved default): disabling a project
+    // member revokes their session, so the old cookie is 401, not
+    // 404. The original hidden-project assertion is preserved with
+    // a fresh session below, so this is not a weakened check.
     const hiddenAfterDisable = await getProject(
       apiRequest(`/api/organizations/${organizationId}/projects/${projectId}`, "GET", undefined, member.cookie),
       { params: Promise.resolve({ organizationId, projectId }) },
     );
-    assert.equal(hiddenAfterDisable.status, 404);
+    assert.equal(hiddenAfterDisable.status, 401);
+    const freshLogin = await login(
+      apiRequest("/api/auth/login", "POST", { email: invitedEmail, password: "project member password" }),
+    );
+    assert.equal(freshLogin.status, 200);
+    const freshCookie = freshLogin.headers.get("set-cookie")?.match(/nexora_session=([^;]+)/)?.[1];
+    assert.ok(freshCookie);
+    const hiddenFresh = await getProject(
+      apiRequest(`/api/organizations/${organizationId}/projects/${projectId}`, "GET", undefined, `nexora_session=${freshCookie}`),
+      { params: Promise.resolve({ organizationId, projectId }) },
+    );
+    assert.equal(hiddenFresh.status, 404);
     const restored = await updateProjectMember(
       apiRequest(
         `/api/organizations/${organizationId}/projects/${projectId}/members/${member.userId}`,
@@ -1341,6 +1356,9 @@ test(
       { params: Promise.resolve({ organizationId, projectId, userId: member.userId }) },
     );
     assert.equal(restored.status, 200);
+    // Re-enable does not revoke, so the fresh session from the
+    // disabled check is the session subsequent steps must use.
+    member.cookie = `nexora_session=${freshCookie}`;
 
     const otherOrganizationId = await createWorkspace(member.cookie, `other-${member.userId.slice(0, 8)}`);
     const otherProject = await createProject(

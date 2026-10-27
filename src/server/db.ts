@@ -306,27 +306,6 @@ export async function lookupLoginAccount(email: string): Promise<LoginAccount | 
   return result.rows[0] ?? null;
 }
 
-export interface OAuthIdentityLookup {
-  user_id: string;
-  status: string;
-  email_verified_at: Date | null;
-}
-
-/**
- * Pre-auth OAuth lookup by (provider, subject) through the SECURITY
- * DEFINER function. Returns only user_id, status, and
- * email_verified_at -- never email, display_name, or password_hash.
- */
-export async function lookupOAuthIdentity(
-  provider: string,
-  subject: string,
-): Promise<OAuthIdentityLookup | null> {
-  const result = await getPool().query<OAuthIdentityLookup>(
-    "SELECT user_id, status, email_verified_at FROM nexora.lookup_oauth_identity($1, $2)",
-    [provider, subject],
-  );
-  return result.rows[0] ?? null;
-}
 
 export async function lookupActiveSession(
   tokenHash: string,

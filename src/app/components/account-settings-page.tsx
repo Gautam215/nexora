@@ -28,12 +28,7 @@ interface ApiResult<T> {
 
 const NETWORK_ERROR = "The service could not be reached. Try again in a moment.";
 
-interface AccountSettingsPageProps {
-  oauthEnabled?: boolean;
-  oauthMessage?: string | null;
-}
-
-export default function AccountSettingsPage({ oauthEnabled, oauthMessage }: AccountSettingsPageProps) {
+export default function AccountSettingsPage() {
   const [user, setUser] = useState<SessionUser | null>(null);
   const [sessions, setSessions] = useState<ListedSession[]>([]);
   const [loading, setLoading] = useState(true);
@@ -331,24 +326,6 @@ export default function AccountSettingsPage({ oauthEnabled, oauthMessage }: Acco
                   </p>
                 )}
               </section>
-
-              {oauthEnabled && (
-                <section className="account-section" aria-labelledby="google-title">
-                  <h3 id="google-title">Google sign-in</h3>
-                  <p className="account-section-copy">
-                    Link Google sign-in to this account so you can sign in with Google. Linking
-                    never changes your password or email, and it creates no new session.
-                  </p>
-                  <form method="post" action="/api/auth/oauth/google/link/start">
-                    <button className="primary-button" type="submit">
-                      Link Google sign-in
-                    </button>
-                  </form>
-                  {oauthMessage && (
-                    <p className="form-message form-error" role="alert">{oauthMessage}</p>
-                  )}
-                </section>
-              )}
 
               <section className="account-section" aria-labelledby="sessions-title">
                 <h3 id="sessions-title">Active sessions</h3>

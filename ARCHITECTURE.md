@@ -176,6 +176,19 @@ A typical tenant request flows like this:
   production), 14-day lifetime. Verification and reset tokens are
   single-use and also stored only as hashes. Invalid hashes still do dummy
   scrypt work so timing does not leak validity.
+- **Session rotation (approved default, 2026-10-26):** No periodic
+  rotation. A session token alone never grants a role, and every
+  request re-checks membership, so a role downgrade takes effect
+  immediately. Revocation is defense-in-depth on privilege change:
+  organization membership downgrade or disable revokes all of the
+  target user's sessions in the same transaction (migration 0039,
+  `SECURITY DEFINER` functions that refuse owner targets and require
+  an admin/manager caller); project membership disable revokes in
+  the same transaction, while a project role-only change does not
+  revoke. Password change revokes all other sessions and keeps the
+  current trusted session; unauthenticated password reset revokes
+  all sessions. The revoked count is recorded in the membership
+  audit details as `sessionsRevoked`.
 - **Rate limits and abuse protection:** Login and recovery use bounded
   JSON, Zod validation, same-origin/Fetch Metadata checks, and fixed-window
   PostgreSQL rate limits with HMAC-derived subjects (per-user and per-IP
@@ -190,752 +203,34 @@ A typical tenant request flows like this:
   a security boundary, and a client-supplied role is never trusted.
   `withOrganizationContext` is the single gate for tenant operations;
   RLS is the second, independent gate at the database.
-- **Missing (not yet built):** OAuth implementation, organization
-  settings and deletion, project and milestone deletion. Logged-in
-  password change, active session list, and revoke-all are built (API
-  and `/account` UI); OAuth is documented below as a proposal only and
-  must not be implied by UI that does nothing.
+- **Authentication scope:** Email + password only. Google OAuth was
+  implemented (migration 0032) and removed by user decision
+  2026-10-26 (migration 0047, see section 7.1); no OAuth provider
+  is in scope unless the user asks for one again. Logged-in
+  password change, active session list, and revoke-all are built
+  (API and `/account` UI).
 
-## 7.1 OAuth — IMPLEMENTED 2026-10-26 (local, unpushed)
+## 7.1 OAuth — REMOVED 2026-10-26 (email + password only)
 
-This section was the approved design and is now the implemented
-design: the provider module (`src/server/oauth/`), the three
-endpoints, migration 0032, and the sign-in / account UI exist and
-are tested (unit + mock-IdP integration). The design reuses the
-existing session model exactly; it does not introduce an identity
-framework. Live Google verification is still blocked on client
-credentials: no real Google sign-in has been exercised, only a
-local mock IdP.
-
-**Decisions resolved 2026-10-26 (documentation only; implementation
-still pending approval):** the HIGH and MEDIUM risks found in the
-2026-10-26 design review are resolved below — disabled-account gate,
-strict `id_token` validation, tamper-resistant flow cookie, sign-in /
-linking separation, atomic creation with duplicate-email race
-handling, provider-email normalization, access-token discard, fixed
-callback redirect and error codes, separate IP rate limits, the
-RLS / security-definer split in one migration, one Google identity
-per user, flag coverage for both endpoints, the loopback exception,
-existing validation schemas, and one Google button on the sign-in
-page. One deliberate behaviour change from the 2026-10-25 draft is
-called out where it lands: the sign-in flow no longer links an
-identity to an existing account by email match (see "Sign-in flow"
-below). A pre-existing password user adopts Google sign-in through
-the signed-in link flow instead.
-
-### Provider selection and rationale
-
-- **First provider: Google only.** Google is an OpenID Connect
-  provider: it returns an `id_token` whose `email_verified` claim can be
-  checked, it supports Authorization Code flow with PKCE, and its token
-  and revocation endpoints are documented. One provider first proves
-  the linking model; each additional provider adds a separate callback,
-  token handling, and linking edge case, so a second provider is a
-  separate, later change behind the same abstraction.
-- **No identity framework (no Auth.js/NextAuth).** Nexora already has
-  opaque sessions stored as SHA-256 hashes, a single session cookie,
-  RLS, and scrypt passwords. An identity framework would replace that
-  session model, add its own tables, and duplicate the authorization
-  boundary, for a flow that is a few hundred lines of OIDC code when
-  built directly. The proposed code is a small provider module in
-  `src/server/oauth/` implementing one interface
-  (`authorizeUrl`, `exchangeCode`, `verifyIdToken`), never called
-  directly by business logic outside that module.
-- **No new database framework and no Convex.** The proposed tables
-  below are PostgreSQL tables in the existing schema, with the existing
-  RLS and grants pattern.
-
-### Authorization Code flow with PKCE
-
-1. The user clicks "Continue with Google" on the sign-in page. That
-   button is a form that POSTs to the proposed start endpoint (POST,
-   with the existing same-origin check, so a third-party page cannot
-   start a login for a victim).
-2. The server generates a random `state`, a PKCE `code_verifier`,
-   and a `nonce` — each 32 random bytes rendered as 43 base64url
-   characters, the same generation pattern as the existing opaque
-   tokens (`createOpaqueToken`, 43-character base64url) — and stores
-   them plus the validated return path and the flow intent in a
-   short-lived, tamper-resistant cookie. The cookie value is
-   `base64url(payload) + "." + base64url(HMAC-SHA256(payload))`,
-   where the payload is JSON with exactly these fields: `v` (1),
-   `state`, `verifier`, `nonce`, `next` (the `safeReturnPath` result,
-   or `/workspaces`), `intent` (`"signin"` or `"link"`), and
-   `linkUserId` (the signed-in user's UUID when `intent` is
-   `"link"`, otherwise `null`). The HMAC key is a dedicated
-   server-only secret, `OAUTH_FLOW_SIGNING_KEY` (at least 32 bytes,
-   same minimum as the other server secrets); it is never the
-   rate-limit key or the file-signing key, because key reuse across
-   purposes would let a compromise in one purpose forge flows in
-   another. If OAuth is enabled and this key is missing, the start
-   endpoint fails closed (see "Feature flag and missing credentials"
-   below) instead of issuing an unsigned flow cookie. Cookie
-   attributes: `HttpOnly`, `SameSite=Lax` (Lax, not Strict, because
-   the callback is a top-level GET navigation from the provider),
-   `Secure` in production, `Path=/api/auth/oauth` (the narrowest
-   path covering both the start and callback routes, so the flow
-   values are not sent to any other route), no `Domain` attribute,
-   and the `__Host-` prefix in production
-   (`__Host-nexora_oauth_flow`; plain `nexora_oauth_flow` in
-   development, mirroring the session cookie's naming), which binds
-   the cookie to the host that set it and blocks subdomain cookie
-   tossing. The cookie is deleted on the callback, success or
-   failure, so a flow can be used at most once. A malformed cookie,
-   a bad HMAC, a missing field, or an unknown `intent` is rejected
-   with a generic error before any token exchange, and the cookie is
-   deleted. Starting a second flow in the same browser overwrites
-   the flow cookie, so the first flow's callback will fail its state
-   check — only one OAuth flow per browser at a time is supported,
-   and this limitation is documented here rather than silently
-   supported.
-3. The server redirects to Google's authorize endpoint with
-   `response_type=code`, `scope=openid email profile`,
-   `code_challenge` (S256 of the verifier), `code_challenge_method=S256`,
-   `state`, `nonce`, and an exact `redirect_uri`.
-4. The callback is a GET to the proposed callback endpoint. It does
-   NOT use the same-origin check (the provider is cross-origin by
-   design); its defences are the state, the PKCE verifier, and the
-   exact redirect URI, as specified below.
-5. The server exchanges the code at Google's token endpoint,
-   server-side only, with the client secret from the environment. The
-   secret never reaches the browser, is never logged, and is never in
-   a URL.
-6. The server verifies the `id_token` strictly, and any failure is
-   a generic sign-in error; no provider error detail is shown to
-   the client. All of these must hold, or the token is rejected:
-   - **Algorithm allowlist:** the JWT header `alg` must be exactly
-     `RS256`. `none`, `HS256`, and every other algorithm are
-     rejected, even if a key could verify them — accepting `HS256`
-     would let an attacker forge a token with Google's public key
-     as an HMAC secret, and `none` needs no key at all. The header
-     `kid` must be present and non-empty.
-   - **Signature and JWKS:** the signature is verified against
-     Google's JWKS key matching `kid`. JWKS keys are cached for at
-     most 1 hour. On an unknown `kid`, the server refetches the
-     JWKS exactly once and retries; if the `kid` is still unknown,
-     the token is rejected. If the JWKS fetch fails (network error,
-     non-200, malformed document), verification fails closed: the
-     token is rejected and no session is created. Keys are never
-     accepted from any source other than Google's JWKS endpoint.
-   - **Issuer:** `iss` must be exactly
-     `https://accounts.google.com`. Any other value is rejected.
-   - **Audience:** `aud` must be a string exactly equal to this
-     app's `OAUTH_GOOGLE_CLIENT_ID`. An array `aud`, or any other
-     value, is rejected.
-   - **Expiry:** `exp` must be in the future, allowing at most 60
-     seconds of clock skew; `iat`, if present, must not be more
-     than 60 seconds in the future. An expired token is rejected.
-   - **Nonce:** `nonce` must match the flow cookie's `nonce`
-     exactly.
-   - **Verified email:** `email_verified` must be exactly the
-     boolean `true`. Missing, `false`, or any non-boolean value is
-     rejected — an unverified provider email is not evidence of
-     ownership, and a missing claim must fail closed, not default
-     to trusted.
-   - **Subject and email shape:** `sub` must be a non-empty string
-     (at most 256 characters), and `email` must be a non-empty
-     string that passes the normalization and validation in
-     "Provider email" below before it is used for anything.
-7. The server applies the sign-in or linking rules below, depending
-   on the flow cookie's `intent`. A sign-in (`intent="signin"`) is a
-   normal sign-in, like a password sign-in: it creates exactly one
-   new session with the existing `createSession()` and
-   `setSessionCookie()` (14-day, `HttpOnly`, `SameSite=Strict`,
-   `Secure` in production, `__Host-` prefix in production) and
-   keeps other sessions. It does not revoke other sessions (that
-   behaviour belongs to password reset and password change, where a
-   credential is known to have changed). A link
-   (`intent="link"`) creates no new session at all (see "Link
-   flow" below). In both flows, before any session is created, the
-   account gate in "Account gate" below must pass; a disabled
-   account never receives a session through OAuth.
-
-### Callback, state validation, and error handling
-
-- **State:** must match the flow cookie exactly, must not be expired
-  (10 minutes), and is single-use (the cookie is deleted on first
-  callback, even on failure). A missing, mismatched, or reused state
-  is a generic sign-in error, not a provider error passthrough.
-- **Provider errors:** if the callback carries `error`
-  (`access_denied`, `invalid_request`, or any other value), the user
-  is shown the sign-in page with a generic message ("Sign-in with
-  Google did not complete. Try again or sign in with your password."),
-  and the flow cookie is deleted. The provider's error value is logged
-  server-side only, with the operation and request ID, never with a
-  code, token, or email.
-- **Token-exchange failures:** network failure, invalid grant, or
-  invalid `id_token` all produce the same generic sign-in error and
-  the same server-side log shape as other authentication failures.
-- **Replay protection:** state, PKCE verifier, and nonce are all
-  single-use and short-lived; the authorization code itself is
-  single-use at Google. A replayed callback (same state, same code)
-  fails at the state check before any token exchange, so it cannot
-  create a second session.
-
-### Account linking and account-takeover prevention
-
-Linking is keyed by the provider subject (`sub`), not by email.
-The proposed `oauth_identities` table (below) stores
-`(provider, provider_subject)` as the unique key, and
-`provider_email` is never a lookup key and never a linking key: it
-is informational only, it has no unique constraint, and no query in
-either flow looks an identity up by email. Sign-in and linking are
-separate flows, distinguished by the flow cookie's `intent`
-(see step 2 above). At most one Google identity per Nexora user is
-allowed initially, enforced by `UNIQUE(user_id, provider)` (see
-"Proposed database changes" below).
-
-### Provider email
-
-Before the provider email is used for anything, it is normalized
-with the existing `normalizeAuthEmail` (trim, then lowercase) and
-validated with the existing email rule from `auth-schemas.ts`
-(trim, 3–320 characters, valid email shape, lowercased) — the same
-rule registration uses, because `users` enforces the normalized
-form (`users_email_normalized` CHECK) and the 3–320 length CHECK.
-A provider email that fails normalization or validation is a
-generic sign-in error, never a 500 from a CHECK violation. The
-normalized email is what is stored on the identity row and what is
-compared with `users.email`; the raw `id_token` email is never
-stored and never compared.
-
-### Account gate
-
-Before any session is created in either flow, the target account
-must pass the same gate password login applies (see the login
-route): `status` must be `"active"` and `email_verified_at` must
-be set. A disabled account never receives a session through OAuth,
-even with a valid, verified Google token — otherwise OAuth would
-be a way to revive an account that was deliberately disabled.
-A failed gate is a generic sign-in error (or, for a link flow, the
-link error in "Callback redirect and error codes" below); it never
-reveals whether the account is disabled, unverified, or missing.
-
-### Sign-in flow (`intent="signin"`)
-
-1. Look the identity up by `(provider, provider_subject)` only
-   (see "Pre-auth lookup" below). If it is found, run the account
-   gate for its user, update `last_used_at` (and `provider_email`
-   if the provider email changed, per "Provider email changes
-   later" below), and create exactly one new session. Other
-   sessions are kept.
-2. If no identity is found and the provider email is verified
-   (`email_verified` exactly `true`): check whether any Nexora
-   user already has the normalized email.
-   - If no user has it, create a new user and its identity row
-     atomically (see "Atomic creation and duplicate-email races"
-     below). `display_name` comes from the provider profile
-     through the existing registration name rule (trim, 1–120
-     characters; fallback: the email local part if the profile
-     name is empty after trimming). `email_verified_at` is set to
-     now, because the provider verified the email.
-     `password_hash` is NULL (see schema changes below). Then
-     create exactly one new session.
-   - If a user already has it, **do not link and do not create.**
-     This is a deliberate change from the 2026-10-25 draft, which
-     linked on a verified-email match: the sign-in flow now never
-     creates a link from an email match, because email is never a
-     linking key. Creating would violate `users_email_unique`,
-     and linking by email alone would reintroduce the
-     takeover surface this design exists to close. The user gets
-     the generic sign-in error with an actionable, non-revealing
-     message (see the error-code table below): sign in with their
-     password first, then link Google from Account security.
-     Note on enumeration: this branch is only reachable with a
-     Google account whose verified email the caller already
-     controls, so it discloses nothing about an address the
-     caller does not own.
-3. If the provider email is NOT verified, never create an account,
-   never link, never sign in. Show the generic sign-in error and
-   offer password sign-in. An unverified provider email is not
-   evidence of ownership.
-
-### Link flow (`intent="link"`)
-
-The link flow is started only by a signed-in user, via a POST with
-the existing same-origin check, after explicit confirmation on the
-account page. The flow cookie's `linkUserId` is the user_id of the
-session that started the flow.
-
-1. At the callback, the current session's user_id must equal
-   `linkUserId`, or the link is aborted with a generic error and
-   no identity is created. This covers the case where the user
-   signed out (or another user signed in) on the same browser
-   between start and callback: without this check, the provider
-   could be linked to the wrong account.
-2. Look the identity up by `(provider, provider_subject)` only.
-   - If it is already linked to the same user, treat it as
-     already-linked: no duplicate insert (the unique constraints
-     would reject one), no new session, redirect to `/account`.
-   - If it is linked to a different user, refuse with a generic
-     message that does not reveal that the other account exists.
-3. If no identity is found, enforce the one-identity rule first:
-   if the signed-in user already has a Google identity (a
-   different `sub`), refuse — one Google identity per user
-   initially — with a clear message on `/account` (this message
-   is about the user's own account, so it reveals nothing to
-   anyone else).
-4. Then apply the squatting guard: the provider email must either
-   match the signed-in user's `users.email` or belong to no
-   Nexora account at all. If it belongs to a different Nexora
-   account, refuse with a generic message that does not reveal
-   that the other account exists. Here email is only a guard
-   against squatting on another user's address; it is still never
-   a lookup key and never creates the link by itself.
-5. On success, insert the identity row and redirect to `/account`.
-   **No new session is created by a link flow.** The user is
-   already signed in; creating a session they did not ask for
-   would add an unexplained session to their `/account` list.
-   If the session is gone at callback time, the link is aborted
-   and the user is sent to `/login` with a generic error code.
-
-### Atomic creation and duplicate-email races
-
-User creation and identity insertion happen in a single
-transaction, following the registration pattern (a new UUID with
-`withUserContext(newId)`, user insert plus identity insert, then
-commit) — never as two separate commits, so a crash between them
-cannot leave a passwordless user with no identity. If the
-transaction fails on a duplicate-email unique violation (two
-callbacks racing for the same new address), it is a recoverable
-conflict, not a 500: re-look the normalized email up, and if a
-user now exists with it, fall back to the sign-in flow's
-email-taken branch (generic error guiding to password sign-in and
-linking from Account security). If the re-lookup finds nothing,
-return the generic sign-in error. The same rule applies to a
-duplicate `(provider, provider_subject)` violation in either flow:
-re-look the identity up and proceed as if it had been found
-(already-linked for the same user, refused for a different user),
-never a 500. If identity insertion commits but session creation
-then fails, the user gets a generic error and a retry signs them
-in through the existing identity — that state is recoverable by
-design, not a broken account.
-
-- **Never merge two existing Nexora accounts automatically.** If two
-  accounts exist, they stay separate; merging is a manual,
-  out-of-scope process, not a callback side effect.
-- **Provider email changes later:** a later OAuth sign-in is looked
-  up by `(provider, sub)`, not by email. If the provider email has
-  changed, `provider_email` on the identity row is updated, but
-  `users.email` is NOT changed automatically — `users.email` is the
-  workspace identity and changing it would affect memberships.
-  Changing a Nexora email address is a separate future feature.
-- **Unlinking (future, not in this design):** unlinking a provider
-  must require that the account still has a way to sign in (a password
-  set, or another linked provider). An account must never be left
-  with no sign-in method by an unlink action.
-
-### Access token
-
-Google's token endpoint also returns an `access_token`. The design
-does not request offline access (`access_type` is never set to
-`offline`, so no `refresh_token` is issued), and the `access_token`
-is discarded immediately after the `id_token` is verified: it is
-never stored in the database, the session, or a cookie, never sent
-to the browser, never logged, and never used for Google APIs.
-Only the verified `id_token` claims (`sub`, normalized email,
-`email_verified`, profile name) are used, and only for the account
-decisions above.
-
-### CSRF, redirect, secrets, rate limits
-
-- **CSRF:** the state value and PKCE verifier are the callback CSRF
-  defence (the callback cannot use the same-origin check, as above).
-  The start endpoint is a POST with the existing same-origin check.
-  The link start endpoint is likewise a POST with the same-origin
-  check, and it additionally requires a valid session.
-- **Redirect URI validation:** the redirect URI is derived from
-  `APP_ORIGIN` plus the fixed callback path, never from user input,
-  and must match exactly the URI registered in the Google console.
-  No wildcards, no query-string redirects. The return path after
-  sign-in (`next`) is validated with the existing
-  `safeReturnPath()` and stored in the flow cookie at start time; a
-  `next` value in the callback query is ignored.
-
-### Callback redirect and error codes
-
-The callback never returns HTML or JSON: it always answers with a
-fixed 302 redirect, with the session cookie (sign-in success only)
-set on that redirect response. That way the authorization code
-never stays in the address bar and never reaches a rendered page,
-where it could leak through a link, a copy, or a third-party
-resource. Redirect targets: sign-in success goes to the flow
-cookie's `next` (already validated by `safeReturnPath` at start
-time) or `/workspaces`; link success goes to `/account`; every
-failure goes to `/login` (sign-in flow, or link flow with no valid
-session) or `/account` (link flow with a valid session), with
-exactly one allowlisted error code in the query string. The
-receiving page renders only the fixed message for that code from
-the table below; it never echoes a query value, and the provider's
-error text is never shown and never put in the URL.
-
-| Code | Shown message | Used when |
-| --- | --- | --- |
-| `oauth_failed` | "Sign-in with Google did not complete. Try again or sign in with your password." | Any generic callback failure: bad state, bad PKCE, token-exchange failure, `id_token` rejection, account-gate failure, atomicity fallback, missing credentials at callback time. |
-| `oauth_denied` | "Google sign-in was not completed. Try again or sign in with your password." | The provider returned `error=access_denied` (the user cancelled at Google). Any other provider `error` value maps to `oauth_failed`, never to a distinct code. |
-| `oauth_expired` | "The Google sign-in expired. Start again from the sign-in page." | Flow cookie missing, expired (10 minutes), or already used. |
-| `oauth_already_linked` | "This account already has a Google sign-in linked." | Link flow only: the signed-in user already has a Google identity. Shown on `/account`, about the user's own account, so it reveals nothing to anyone else. |
-| `oauth_email_taken` | "That email already has a Nexora account. Sign in with your password, then link Google from Account security." | Sign-in flow only: the provider email already belongs to a Nexora user, so no link is created by email match (see "Sign-in flow"). |
-
-- **Referrer-Policy (explicit decision):** the callback response
-  must carry `Referrer-Policy: no-referrer`, so no Referer is sent
-  on the redirect that follows it. This is defence in depth on top
-  of the 302-only shape above: even if a future change rendered
-  something at the callback URL, the authorization code in its
-  query string could not leak through a Referer header. The header
-  is required on the callback response only; it is not a global
-  header change in this design.
-
-- **Secrets:** `OAUTH_GOOGLE_CLIENT_ID` is public (it appears in the
-  authorize URL); `OAUTH_GOOGLE_CLIENT_SECRET` and
-  `OAUTH_FLOW_SIGNING_KEY` are server-only, environment-only,
-  never in code, never in a URL, never logged, and never sent to
-  the browser. Rotation is an environment change plus a restart:
-  existing sessions are unaffected, in-flight OAuth flows fail and
-  must be restarted (acceptable, 10-minute window).
-
-### Feature flag and missing credentials
-
-- **Feature flag:** OAuth is disabled by default
-  (`OAUTH_GOOGLE_ENABLED=false`). When disabled, **both** the
-  start and the callback endpoints return 404, so neither endpoint
-  can be probed while the feature is off. A disabled callback does
-  not redirect with an error code — it 404s, exactly like a
-  disabled start.
-- **Missing credentials fail closed, without redirecting to
-  Google.** Credentials are checked at request time (consistent
-  with how the rate-limit key is checked on use, not at process
-  startup). If OAuth is enabled but `OAUTH_GOOGLE_CLIENT_ID`,
-  `OAUTH_GOOGLE_CLIENT_SECRET`, or `OAUTH_FLOW_SIGNING_KEY` is
-  missing, the start endpoint returns 503 (missing configuration
-  fails closed, per the project rules), and the callback returns
-  the generic sign-in error redirect (`oauth_failed`) rather than
-  a 503 page, because the user is mid-flow. In neither case is
-  the user redirected to Google with a missing client ID.
-
-### Rate limits
-
-Start and callback have **separate** IP rate limits, because they
-are different attack surfaces: start is cheap to call, callback
-is where state-guessing floods land, and a shared scope would let
-one surface consume the other's budget. Each limit is **60
-requests per IP per 15 minutes (900 seconds)** as the initial
-proposal, subject to a compatibility review against the existing
-rate-limit rules before implementation (see below). Neither limit
-has a per-email component, because no email exists yet at start
-time and the callback email is provider-supplied, not user-typed:
-login's per-email limit (10 per 900 seconds) has no equivalent
-here, and "rate-limited like login" is therefore not an accurate
-description — only login's IP limit (60 per 900 seconds) is
-comparable. Compatibility: the proposed 60 per 900 seconds fits
-the existing mechanism exactly — `consume_auth_rate_limit`
-(scope, subject hash, max attempts, window) with the existing
-1000-attempt cap and 900-second window, and the same trusted-IP
-header rule (`NEXORA_TRUSTED_CLIENT_IP_HEADER`, required in
-production, IP limit bypassed in development exactly as for
-login). Because the existing helpers (`isRateLimited`,
-`isTokenRateLimited`) both require an email or token subject,
-implementation needs one small IP-only helper that calls the
-existing `consumeIpLimit` path with the new scope — a new call
-shape on the existing mechanism, not a new mechanism, and it must
-not bypass any existing protection. On start, a exceeded limit
-returns 429 with `Retry-After: 900`, exactly like login's
-rate-limit response; on callback, an exceeded limit returns the
-generic sign-in error redirect (`oauth_failed`), not a distinct
-429, so the limit itself does not become an oracle. The callback
-is additionally bounded by single-use state, which already makes
-a replayed callback fail before any exchange.
-
-- **Production origin:** `APP_ORIGIN` must be HTTPS in production.
-  This is already required for the `Secure` session cookie, and it
-  is a hard requirement for the OAuth redirect URI. **Loopback
-  exception (development only):** a production build running on a
-  loopback origin (`localhost`, `127.0.0.1`, `::1`) over HTTP is
-  permitted for local development, matching the existing
-  `hasSameOrigin` loopback exception and Google's own allowance
-  for `http://localhost` redirect URIs. A remote HTTP
-  `APP_ORIGIN` in production is a misconfiguration: OAuth must
-  fail closed there (start returns 503, callback returns the
-  generic sign-in error), never redirect to Google from a remote
-  HTTP origin.
-
-### Database changes — APPLIED in migration 0032
-
-All of the changes below landed in **one append-only migration**
-(0032) plus the matching `db/runtime-grants.sql` update in the
-same change, never as a manual follow-up and never by editing an
-existing migration. The migrator applies `runtime-grants.sql`
-automatically in the same run, so no manual GRANT step is ever
-needed. The migration was tested on a disposable database first,
-and it must not run on production without a separate authorization
-for that database, that migration, and that run. One grant change
-beyond the design's list proved necessary in implementation: the
-`users` INSERT grant gained `email_verified_at`, because OAuth
-creation sets it at insert time (the provider verified the email),
-unlike registration, which verifies later.
-
-- **`oauth_identities` (new table):** `id uuid` (primary key),
-  `user_id uuid` (FK to `users(id)`, ON DELETE CASCADE — deleting
-  a user deletes their identities, which is correct because an
-  identity without a user cannot sign in; note that user deletion
-  itself does not exist yet and `user_sessions` uses ON DELETE
-  RESTRICT, so CASCADE here is a statement about identity
-  lifetime, not a new deletion feature), `provider text`
-  (CHECK: initially only `'google'`), `provider_subject text`
-  (non-empty, at most 256 characters, matching the `id_token`
-  validation), `provider_email text` (normalized, 3–320
-  characters; **no unique constraint** — see below),
-  `created_at timestamptz NOT NULL DEFAULT now()`,
-  `last_used_at timestamptz`. Constraints: `UNIQUE(provider,
-  provider_subject)` (the identity key) **and**
-  `UNIQUE(user_id, provider)` (at most one Google identity per
-  user initially). Index on `user_id` for the one-identity check
-  and for `/account` listing. `provider_email` is deliberately
-  non-unique: it is informational only, it is never a lookup key,
-  and a provider email change that happens to match another
-  user's email must not fail the identity update.
-- **RLS / security-definer split (decided, not left open).** The
-  two access patterns in this design need two different
-  mechanisms, and the migration must provide both:
-  - **Pre-auth lookup by subject** (callback, before any session
-    exists) cannot use RLS, because there is no user context yet
-    — an RLS `select_self` policy would deny it. It therefore
-    goes through a new SECURITY DEFINER function,
-    `lookup_oauth_identity(provider, provider_subject)`,
-    following the existing `lookup_user_for_login` pattern
-    (`STABLE`, `SECURITY DEFINER`, `SET search_path = pg_catalog,
-    nexora`). It returns the **minimal** result the callback
-    needs for the account gate and nothing more: `user_id`,
-    `status`, and `email_verified_at`. It never returns `email`,
-    `display_name`, or `password_hash`, and it is the only way
-    the callback learns a user_id from a subject.
-  - **Creation and linking** (signed-in link flow, and the
-    creation transaction) follow the registration pattern:
-    `withUserContext` plus RLS policies on `oauth_identities`
-    (`INSERT` / `SELECT` / `UPDATE` where `user_id` equals the
-    current user id, mirroring `users_insert_self` /
-    `users_select_self` / `users_update_self`). The app role
-    never reads `oauth_identities` outside one of these two
-    paths.
-  - RLS is enabled on the table (`ENABLE ROW LEVEL SECURITY`),
-    with the policies above; without RLS enabled, the app role
-    could read every user's identities, which is exactly what
-    the policies exist to prevent.
-- **Column-scoped grants (in `runtime-grants.sql`, same change):**
-  mirroring the `users` grants pattern, not blanket ALL. App
-  role on `oauth_identities`: `SELECT (id, user_id, provider,
-  provider_subject, provider_email, created_at, last_used_at)`,
-  `INSERT (id, user_id, provider, provider_subject,
-  provider_email)`, `UPDATE (provider_email, last_used_at)`, and
-  `EXECUTE` on `lookup_oauth_identity`. The migrator role owns
-  the table, as with every other table.
-- **`users.password_hash` nullable (proposed change):** OAuth-only
-  users have no password, so the current `NOT NULL` constraint and
-  the `users_password_hash_length` check must be relaxed to allow
-  NULL in the same migration (new CHECK: `password_hash IS NULL
-  OR length(password_hash) BETWEEN 32 AND 512`). The login code
-  already treats a null or malformed hash as a failed verification
-  (dummy scrypt work), so a null hash can never sign in by
-  password. The alternative — storing a random "unusable" hash —
-  is rejected: a fake hash looks like a real password hash,
-  invites confusion in audits, and complicates the "set a
-  password later" flow, which already works through the existing
-  password-reset route once the user has a verified email. No
-  other `users` column changes in this design. The migration
-  change must also update any migration-guard test that asserts
-  the old `password_hash` NOT NULL / CHECK shape, or that test
-  will (correctly) fail on the new schema.
-- **Rate-limit scopes (same migration):** add both `oauth-start`
-  and `oauth-callback` — separate scopes, decided, not "if
-  chosen" — to **both** the `consume_auth_rate_limit` function
-  allowlist **and** the `auth_rate_limits` table CHECK,
-  following migration 0023's lesson that both allowlists must
-  change together, or the first rate-limit call fails (22023
-  from the function, 23514 from the CHECK).
-
-### Environment variables and operations — IMPLEMENTED
-
-| Variable | Required | Notes |
-| --- | --- | --- |
-| `OAUTH_GOOGLE_ENABLED` | No (default `false`) | Feature flag; when false, **both** start and callback return 404. |
-| `OAUTH_GOOGLE_CLIENT_ID` | Yes, when enabled | Public; appears in the authorize URL. |
-| `OAUTH_GOOGLE_CLIENT_SECRET` | Yes, when enabled | Server-only; never logged, never in a URL. Missing while enabled: start 503, callback generic error redirect, never a redirect to Google. |
-| `OAUTH_FLOW_SIGNING_KEY` | Yes, when enabled | Dedicated HMAC key for the flow cookie, at least 32 bytes, server-only. Never reuse the rate-limit key or the file-signing key. Missing while enabled: start fails closed (503), no unsigned flow cookie is issued. |
-| `APP_ORIGIN` | Already required | Must be HTTPS in production, except loopback origins (`localhost`, `127.0.0.1`, `::1`) over HTTP for local development only. Redirect URI is derived from it. |
-
-Operational notes: register exactly one redirect URI and one
-JavaScript origin (`APP_ORIGIN`) in the Google console; test the
-redirect-URI mismatch case in staging (Google rejects it before any
-code runs, which is the correct failure); rotate the secret by
-changing the environment and restarting, with no database change;
-log OAuth start/callback success and failure with operation and
-request ID only (no tokens, no codes, no emails in logs, following
-the existing logging practice); and note that revoking Google access
-does NOT automatically revoke Nexora sessions — a user who loses
-Google access must still use `/account` session revocation, and a
-provider revocation event is not a Nexora sign-out. The
-`.env.example` entries (placeholders only, never real values) and
-the sign-in page button (see below) were added in the
-implementation change. Test-only endpoint overrides
-(`OAUTH_GOOGLE_AUTHORIZE_URL`, `OAUTH_GOOGLE_TOKEN_URL`,
-`OAUTH_GOOGLE_JWKS_URL`) are honored only outside production, so a
-production deployment always talks to Google's real endpoints; they
-exist so the mock-IdP integration tests can run without network
-access.
-
-### Observability — IMPLEMENTED 2026-10-26 (local, unpushed)
-
-Three endpoints, three distinct purposes:
-
-- `GET /api/health` (liveness, unauthenticated, always 200): a live
-  process answers; the `database` field — not the status code —
-  reports database state, so a Neon scale-to-zero wake-up does not
-  flap a liveness probe.
-- `GET /api/ready` (readiness, unauthenticated): 200 only when the
-  database probe succeeds, 503 otherwise, so a load balancer can
-  hold traffic until the process can actually serve. Returns no
-  detail beyond the boolean.
-- `GET /api/metrics` (operator, token-authenticated): in-process
-  counters collected at the shared JSON response helpers
-  (`src/server/metrics.ts`), so every JSON route is counted with no
-  per-route code. Reports uptime, request counts by status class and
-  by normalized path (UUID/numeric segments become `:id`, query
-  strings never recorded), failures by operation name, a timed
-  database probe latency, and pool counters (total/idle/waiting),
-  plus realtime counters (live/total stream connections, events
-  published, events enqueued to streams; "delivered" means enqueued,
-  not client-acknowledged).
-  No user data, request body, or credential is ever recorded, and
-  the path table is capped to bound memory.
-
-Authentication for metrics is a shared bearer token
-(`NEXORA_METRICS_TOKEN`, header `x-nexora-metrics-token`,
-constant-time comparison); when the variable is unset the endpoint
-fails closed with 503 instead of serving metrics unauthenticated.
-Counters are process-local: a multi-instance deployment aggregates
-across instances in the external monitor. OAuth 302 redirects
-bypass the JSON helpers and are not counted; their failures remain
-covered by the structured failure logs. **Not implemented here:**
-alerting needs an operator channel decision (the external monitor
-scraping `/api/metrics` is the intended alert source — alert on
-5xx rate and on `database.up` false); queue/job failure metrics
-are not applicable because Nexora has no queue or background job
-system (cleanup is an operator-run script, see Phase 4 item 1).
-
-### Sign-in page button (decided)
-
-The sign-in page has **one** Google button, labelled "Continue
-with Google", and it serves **both** sign-in and account creation:
-a new Google user who completes the sign-in flow gets an account
-created by that same flow (see "Sign-in flow"), so no separate
-sign-up button is needed. The button is a form that POSTs to the
-start endpoint (same-origin check applies); it is **not rendered
-at all** when the feature flag is off, so there is no dead button
-that 404s, and it does **not** appear on the register page, so
-there is no second, duplicate flow to maintain. The button reuses
-the existing auth shell and shared auth-page component patterns;
-its styling follows `DESIGN.md` and is decided in the
-implementation change, not here.
-
-### Security tests and acceptance criteria — COVERED (mock IdP; live Google pending)
-
-These criteria were required before any OAuth code shipped, and they
-are now covered by `tests/oauth-google.test.ts` (unit) and
-`tests/oauth-google.integration.test.ts` (mock IdP) — except the
-parts that need real Google credentials, which remain unexercised:
-
-- **Unit:** PKCE S256 challenge equals `base64url(SHA256(verifier))`,
-  verifier length 43 (32 random bytes, base64url); state, verifier,
-  and nonce randomness and single-use; flow-cookie HMAC verifies,
-  and a tampered cookie, a malformed cookie, and a missing field
-  are all rejected before any exchange; redirect URI exact match
-  (a trailing slash or extra query fails); `safeReturnPath`
-  rejects external `next` values and callback `next` is ignored;
-  `id_token` validation rejects wrong `aud` (including an array
-  `aud`), expired token, wrong `iss`, mismatched `nonce`,
-  `email_verified=false` **and** `email_verified` missing,
-  `alg=none`, `alg=HS256`, and unknown `kid` after one JWKS
-  refetch; JWKS fetch failure fails closed.
-- **Linking matrix (unit + integration):** provider-verified email
-  with no existing user creates a user; provider email belonging
-  to an existing Nexora user in a **sign-in** flow does NOT link
-  and does NOT create (generic error guiding to password sign-in
-  and linking from Account security); provider-unverified email
-  never creates, links, or signs in; disabled account (`status`
-  != `"active"`) never receives a session through OAuth, in
-  either flow; link flow with a changed session (current user !=
-  `linkUserId`) aborts with no identity created; link flow
-  creates no new session; link flow with an already-linked
-  identity for the same user is already-linked, not a 500; link
-  flow with an identity linked to a different user refuses
-  without revealing that account; link flow with a second Google
-  identity for the same user refuses (one identity per user);
-  link flow with a provider email belonging to a different
-  Nexora account refuses without revealing that account.
-- **Atomicity and races (integration, disposable database):**
-  user + identity commit together; a duplicate-email race
-  re-looks the email up instead of returning 500; a duplicate
-  `(provider, sub)` race re-looks the identity up instead of
-  returning 500; identity committed but session creation failed
-  is recoverable by retry through the existing identity.
-- **Validation (unit):** provider email normalization
-  (`normalizeAuthEmail`) and the existing email schema (trim,
-  3–320, valid shape, lowercase) reject over-long, malformed,
-  and unnormalized emails before lookup or insertion; provider
-  display name goes through the existing registration name rule
-  (trim, 1–120, email-local-part fallback).
-- **Rate limits and flag (integration):** start IP limit 60 per
-  900 seconds and callback IP limit 60 per 900 seconds, as
-  separate scopes, enforced with the trusted-IP header set
-  (in development the IP limit is bypassed exactly as for login,
-  so tests must set the header to exercise it); disabled flag
-  makes **both** start and callback return 404; enabled with a
-  missing client secret or flow-signing key fails closed (start
-  503, callback generic error redirect, no redirect to Google);
-  remote HTTP `APP_ORIGIN` in production fails closed the same
-  way, while loopback HTTP is permitted for local development.
-- **Callback shape (unit + browser):** callback always answers
-  with a fixed 302 (never HTML/JSON), with
-  `Referrer-Policy: no-referrer`, and only allowlisted error
-  codes (`oauth_failed`, `oauth_denied`, `oauth_expired`,
-  `oauth_already_linked`, `oauth_email_taken`) whose messages
-  come from a fixed table, never from a query value or provider
-  text; the access token is never persisted (no row, no session
-  value, no cookie contains it) and no offline access is
-  requested.
-- **Integration (disposable database, mocked provider — never real
-  Google in tests):** a stub token endpoint and JWKS let the full
-  callback flow run: first login creates user + identity, second
-  login signs in the same user, provider email change does not
-  change `users.email`, replayed state/code is rejected, expired
-  flow is rejected, `error=access_denied` shows the generic sign-in
-  message, and a revoked session after OAuth login still works via
-  `/account`. The sign-in page shows one Google button when the
-  flag is on and none when it is off, and no Google button
-  appears on the register page.
-- **Migration (disposable database):** the single new migration
-  applies cleanly, both rate-limit allowlists contain
-  `oauth-start` and `oauth-callback`, `oauth_identities` has RLS
-  enabled with its policies, both unique constraints exist,
-  `provider_email` has no unique constraint, column-scoped
-  grants exist for the app role, `lookup_oauth_identity` returns
-  only `user_id`, `status`, and `email_verified_at`, and
-  `users.password_hash` accepts NULL while the old CHECK shape
-  is updated in migration-guard tests.
-- **Manual acceptance (staging, real Google, test account only):**
-  sign-in with Google works end to end; redirect-URI mismatch is
-  rejected by Google; secret rotation (env change + restart) does
-  not break existing sessions; session cookie attributes are
-  verified in the browser (`HttpOnly`, `Secure`, `SameSite=Strict`,
-  `__Host-` prefix in production); and an OAuth-only user can set a
-  password later via the reset flow (which requires production SMTP
-  to be verified — see the release note below).
-- **Release note, not a blocker for OAuth sign-in itself:** OAuth
-  sign-in does not depend on SMTP (the provider verifies the email),
-  but the "set a password later" path for OAuth-only users does
-  depend on password-reset email delivery, which is currently
-  unverified in production. That path must be verified before it is
-  offered to OAuth-only users.
+Google OAuth was implemented in migration 0032 and removed by user
+decision on 2026-10-26 ("Sirf email/password rakho"): the only
+sign-in path is now email + password (registration, email
+verification, login, password reset, logged-in password change, and
+active-session management). The removal is append-only migration
+0047: it drops `nexora.oauth_identities` and
+`nexora.lookup_oauth_identity`, deletes leftover `oauth-start` /
+`oauth-callback` rate-limit buckets, and removes those two scopes
+from both the `auth_rate_limits` CHECK and the
+`consume_auth_rate_limit` allowlist. Migration 0032 is kept
+untouched as history. The OAuth routes, provider code, sign-in
+button, and account-link section were deleted with the removal;
+`users.password_hash` stays nullable (0032 made it so) because
+restoring NOT NULL would fail on any database that already has an
+OAuth-only user — login by password already treats a NULL hash as
+a failed verification, and a former OAuth-only user can recover
+through the password-reset flow, which sets a hash. No Google
+client credentials are needed anymore, and no OAuth provider is
+planned unless the user asks for one again.
 
 ## 8. External services
 
@@ -1046,8 +341,20 @@ The shape below is enforced by the code, not aspirational:
   Event data is minimal (ids, titles, names) and never contains
   secrets, bodies, or emails. Connection attempts are rate-limited
   (scope `realtime-connect-user`, 120/hour/user).
-- **Explicitly NOT built:** `notification.created` (notifications
-  already have their own centre; streaming them is future work) and
+- **Notification stream (implemented 2026-10-26, approved
+  default):** `notification.created` over SSE on a
+  per-organization, per-recipient channel
+  (`GET /api/organizations/{id}/notifications/stream`, see
+  `src/server/notifications/user-stream.ts`). It is deliberately
+  NOT a global per-user stream and NOT on project streams, for
+  the recipient-isolation reason in the deployment runbook: the
+  notifications table's FORCE RLS policy filters every row to
+  recipient + organization + project still accessible. Reconnect
+  via last-event-id, `?since_id=`, or `?since=` (ISO timestamp);
+  replay up to 200, then one `resync`. Rate limit shares the
+  realtime connection scope (120/hour per user).
+- **Explicitly NOT built:** production WebSocket connectivity
+  (SSE over HTTP is the transport) and
   `presence.changed` is implemented as ephemeral roster state, not
   a log event: an in-process registry
   (`src/server/realtime/presence.ts`) tracks which members hold a
@@ -1070,6 +377,54 @@ The shape below is enforced by the code, not aspirational:
   ("delivered" means enqueued, not client-acknowledged — SSE has no
   acknowledgements). Per-request latency histograms and alerting
   remain future work (see §7).
+
+## 9a. File storage abstraction
+
+All file bytes go through `src/server/storage.ts`, never through
+the filesystem directly from a route. The provider is chosen by
+`NEXORA_STORAGE_PROVIDER` (`local` by default; `s3` for an
+S3-compatible store). The local provider is the existing private
+directory (`NEXORA_PRIVATE_FILE_DIR`, 0700 directory, 0600 files,
+UUID `.blob` keys, O_NOFOLLOW reads, integrity size checks). The
+S3 provider is implemented with plain fetch and SigV4 signing
+(no object-storage SDK, per §5 of the project rules); object keys
+are the same `<uuid>.blob` names, so a migration can copy objects
+by key and verify byte counts and hashes before switching the
+provider. Presigned download URLs are short-lived (300 seconds,
+matching the signed-link TTL) and are issued only after
+authorization; the primary download path remains the Nexora route,
+which re-checks project/task authorization, file version, and
+integrity before reading from any provider. Authorization is never
+delegated to the provider or to a presigned URL. S3 is implemented
+and unit-tested against a fake HTTP server only — it is NOT
+live-verified against a real S3 endpoint, and selecting `s3`
+without a complete configuration fails closed instead of silently
+falling back to local storage (a silent fallback would split files
+across two stores). Switching providers in production is a
+copy-then-verify migration (see `docs/deployment.md`), not a flag
+flip, because `task_files.storage_key` alone does not record which
+provider holds the bytes.
+
+## 9b. Malware scanning
+
+File uploads are scanned synchronously through
+`src/server/malware.ts` before their database row is committed.
+The default candidate is ClamAV, spoken to over the clamd
+INSTREAM protocol with plain `node:net` (no SDK). A configured
+scanner reporting clean records `scan_status = 'clean'`; a
+signature match records `'quarantined'`; a scanner that cannot be
+reached, times out, or answers unparsably is treated exactly like
+a signature match — quarantined, never clean. With no scanner
+configured, uploads record `'pending'`, which means "not scanned"
+and must never be presented as clean. Quarantined bytes and rows
+are kept (so an operator can inspect or delete them), but every
+download path, including signed links, refuses them with 409
+FILE_QUARANTINED. `scripts/rescan-task-files.mjs` (migrator role)
+rescans pending and quarantined files once a scanner exists; it
+leaves a file unchanged when the scanner is unavailable, and exits
+non-zero, rather than rewriting state it did not verify. Live
+ClamAV is not verified; the adapter is tested against a fake
+clamd only.
 
 ## 10. Environment configuration
 

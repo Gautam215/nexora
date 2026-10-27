@@ -23,7 +23,7 @@ export async function isRateLimited(
 
 /**
  * IP-only rate limit for endpoints with no user-typed subject yet
- * (OAuth start/callback). Same mechanism, same trusted-IP-header rule,
+ * Same mechanism, same trusted-IP-header rule,
  * and the same development bypass as the IP half of isRateLimited;
  * it does not bypass any existing protection.
  */

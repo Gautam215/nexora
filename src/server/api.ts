@@ -31,7 +31,7 @@ function jsonResponse(
   responseHeaders.set("x-request-id", id);
   responseHeaders.set("cache-control", "no-store");
   // Every JSON response is counted here, once, by normalized path and
-  // status class. Redirects (OAuth) bypass this helper and are not
+  // status class. Redirects bypass this helper and are not
   // counted; see src/server/metrics.ts for the scope and limits.
   try {
     recordResponse(new URL(request.url).pathname, status);

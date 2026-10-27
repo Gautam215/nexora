@@ -166,6 +166,33 @@ export async function sendPasswordResetEmail(to: string, token: string): Promise
   );
 }
 
+// Generic notification email, used only by the notification-email
+// worker (never synchronously from a mutation route). The subject
+// and body come from the in-app notification, which is already
+// bounded (title 1–120, body 1–500) and never contains a secret.
+// Configuration errors stay configuration errors; a genuine send
+// failure becomes EmailDeliveryError with no SMTP detail.
+export async function sendNotificationEmail(
+  to: string,
+  subject: string,
+  text: string,
+): Promise<void> {
+  const safeSubject = subject.replace(/[\r\n]+/g, " ").slice(0, 120);
+  const safeText = text.slice(0, 500);
+  try {
+    await getTransporter().sendMail({
+      from: process.env.SMTP_FROM?.trim(),
+      to,
+      subject: safeSubject,
+      text: safeText,
+      html: `<p>${escapeHtml(safeText)}</p>`,
+    });
+  } catch (error) {
+    if (error instanceof EmailConfigurationError) throw error;
+    throw new EmailDeliveryError();
+  }
+}
+
 export async function sendOrganizationInvitationEmail(
   to: string,
   token: string,

@@ -8,7 +8,10 @@ import {
   jsonServerFailure,
   parseJson,
 } from "../../../../../../../../server/api.ts";
-import { getAuthPrincipal } from "../../../../../../../../server/auth.ts";
+import {
+  getAuthPrincipal,
+  shouldRevokeSessionsOnProjectChange,
+} from "../../../../../../../../server/auth.ts";
 import { isRateLimited } from "../../../../../../../../server/auth-rate-limit.ts";
 import { withOrganizationContext } from "../../../../../../../../server/db.ts";
 import { notifyProjectMember, notifyProjectMembers } from "../../../../../../../../server/project-notifications.ts";
@@ -105,6 +108,14 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
         );
         const membership = updated.rows[0];
         if (!membership) return { kind: "member_not_found" as const };
+        let sessionsRevoked = 0;
+        if (shouldRevokeSessionsOnProjectChange({ status: membership.status })) {
+          const revoked = await transaction.query<{ revoked_count: number }>(
+            `SELECT nexora.revoke_user_sessions_for_project_privilege_change($1, $2, $3) AS revoked_count`,
+            [organizationId, projectId, userId],
+          );
+          sessionsRevoked = revoked.rows[0]?.revoked_count ?? 0;
+        }
         await transaction.query(
           `INSERT INTO nexora.audit_events
              (id, organization_id, actor_user_id, action, target_type, target_id, details)
@@ -120,6 +131,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
               role: membership.role,
               previousStatus: previous.status,
               status: membership.status,
+              sessionsRevoked,
             }),
           ],
         );
@@ -148,7 +160,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
           body: "A team member's project access was updated.",
           excludedUserIds: [userId],
         });
-        return { kind: "updated" as const, membership };
+        return { kind: "updated" as const, membership: { ...membership, sessionsRevoked } };
       },
       "guest",
     );

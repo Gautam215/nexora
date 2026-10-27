@@ -21,7 +21,6 @@ const organizationSettingsRateLimit = await readFile(new URL("../db/migrations/0
 const milestoneSoftDelete = await readFile(new URL("../db/migrations/0029_milestone_soft_delete.sql", import.meta.url), "utf8");
 const milestonePurgeQualification = await readFile(new URL("../db/migrations/0030_milestone_purge_column_qualification.sql", import.meta.url), "utf8");
 const milestonePurgeTenantContext = await readFile(new URL("../db/migrations/0031_milestone_purge_tenant_context.sql", import.meta.url), "utf8");
-const oauthGoogle = await readFile(new URL("../db/migrations/0032_oauth_google.sql", import.meta.url), "utf8");
 const organizationSoftDelete = await readFile(new URL("../db/migrations/0033_organization_soft_delete.sql", import.meta.url), "utf8");
 const aiExecutions = await readFile(new URL("../db/migrations/0034_ai_executions.sql", import.meta.url), "utf8");
 const aiCreationIdempotency = await readFile(new URL("../db/migrations/0035_ai_creation_idempotency.sql", import.meta.url), "utf8");
@@ -34,10 +33,7 @@ const projectUpdateIdempotencyFix = await readFile(
   new URL("../db/migrations/0038_project_update_idempotency_fix.sql", import.meta.url),
   "utf8",
 );
-const oauthStartRoute = await readFile(new URL("../src/app/api/auth/oauth/google/start/route.ts", import.meta.url), "utf8");
-const oauthStartShared = await readFile(new URL("../src/server/oauth/start.ts", import.meta.url), "utf8");
-const oauthCallbackRoute = await readFile(new URL("../src/app/api/auth/oauth/google/callback/route.ts", import.meta.url), "utf8");
-const oauthGoogleModule = await readFile(new URL("../src/server/oauth/google.ts", import.meta.url), "utf8");
+const oauthRemoval = await readFile(new URL("../db/migrations/0047_remove_google_oauth.sql", import.meta.url), "utf8");
 const milestoneItemRoute = await readFile(new URL("../src/app/api/organizations/[organizationId]/projects/[projectId]/milestones/[milestoneId]/route.ts", import.meta.url), "utf8");
 const milestoneSchemas = await readFile(new URL("../src/security/milestone-schemas.ts", import.meta.url), "utf8");
 const organizationRoute = await readFile(new URL("../src/app/api/organizations/[organizationId]/route.ts", import.meta.url), "utf8");
@@ -449,61 +445,30 @@ test("milestone soft delete detaches tasks, keeps audit, and purges only after r
   assert.match(projectWorkBoundary, /milestone\.deleted_at IS NULL/);
 });
 
-test("OAuth identities table, lookup function, nullable password, and scopes (0032)", () => {
-  // Table shape: one Google identity per user, keyed by subject;
-  // provider_email is informational only and deliberately non-unique.
-  assert.match(oauthGoogle, /CREATE TABLE nexora\.oauth_identities/);
-  assert.match(oauthGoogle, /CONSTRAINT oauth_identities_subject_unique UNIQUE \(provider, provider_subject\)/);
-  assert.match(oauthGoogle, /CONSTRAINT oauth_identities_user_provider_unique UNIQUE \(user_id, provider\)/);
-  assert.match(oauthGoogle, /provider text NOT NULL CHECK \(provider = 'google'\)/);
-  assert.match(oauthGoogle, /provider_subject text NOT NULL CHECK/);
-  assert.match(oauthGoogle, /provider_email text NOT NULL CHECK/);
-  // provider_email itself is never unique: the UNIQUE constraints
-  // below belong to (provider, subject) and (user_id, provider).
-  assert.doesNotMatch(oauthGoogle, /provider_email[^\n]*UNIQUE/);
-  assert.match(oauthGoogle, /ALTER TABLE nexora\.oauth_identities ENABLE ROW LEVEL SECURITY/);
-  assert.match(oauthGoogle, /CREATE POLICY oauth_identities_select_self/);
-  assert.match(oauthGoogle, /CREATE POLICY oauth_identities_insert_self/);
-  assert.match(oauthGoogle, /CREATE POLICY oauth_identities_update_self/);
-  // Pre-auth lookup returns only user_id, status, and
-  // email_verified_at -- never email, display_name, or password_hash.
-  assert.match(oauthGoogle, /CREATE FUNCTION nexora\.lookup_oauth_identity\(target_provider text, target_subject text\)/);
-  assert.match(oauthGoogle, /RETURNS TABLE \(\s+user_id uuid,\s+status text,\s+email_verified_at timestamptz\s+\)/);
-  assert.match(oauthGoogle, /SECURITY DEFINER/);
-  assert.match(oauthGoogle, /REVOKE ALL ON FUNCTION nexora\.lookup_oauth_identity\(text, text\) FROM PUBLIC/);
-  assert.match(grants, /GRANT EXECUTE ON FUNCTION nexora\.lookup_oauth_identity\(text, text\) TO nexora_app;/);
-  // Column-scoped grants, mirroring the users pattern, not blanket ALL.
-  assert.match(grants, /GRANT SELECT \(id, user_id, provider, provider_subject, provider_email, created_at, last_used_at\),\s+INSERT \(id, user_id, provider, provider_subject, provider_email\),\s+UPDATE \(provider_email, last_used_at\)\s+ON TABLE nexora\.oauth_identities TO nexora_app;/);
-  // OAuth-only users have no password: the NOT NULL and the old
-  // length CHECK are replaced by a NULL-allowing CHECK.
-  assert.match(oauthGoogle, /ALTER TABLE nexora\.users ALTER COLUMN password_hash DROP NOT NULL/);
-  assert.match(oauthGoogle, /password_hash IS NULL OR pg_catalog\.length\(password_hash\) BETWEEN 32 AND 512/);
-  // OAuth creation sets email_verified_at at insert time (the provider
-  // verified the email), so the users INSERT grant gains that column.
-  assert.match(grants, /INSERT \(id, email, display_name, password_hash, email_verified_at\),\s+UPDATE \(display_name, password_hash\)\s+ON TABLE nexora\.users TO nexora_app;/);
-  // Both rate-limit scopes in both allowlists (the 0023 lesson).
-  assert.match(oauthGoogle, /'oauth-start',/);
-  assert.match(oauthGoogle, /'oauth-callback'/);
-  assert.match(oauthGoogle, /CREATE OR REPLACE FUNCTION nexora\.consume_auth_rate_limit/);
-  assert.match(oauthGoogle, /DROP CONSTRAINT auth_rate_scope/);
-  assert.match(oauthGoogle, /ADD CONSTRAINT auth_rate_scope CHECK/);
-  // Route shape: flag-gated 404s, fail-closed credentials, fixed 302s
-  // with no-referrer, no same-origin check on the callback (the
-  // provider is cross-origin by design; state and PKCE defend it).
-  assert.match(oauthStartShared, /isOAuthEnabled/);
-  assert.match(oauthStartRoute, /hasSameOrigin/);
-  assert.match(oauthCallbackRoute, /isOAuthEnabled/);
-  assert.match(oauthCallbackRoute, /oauth_failed/);
-  assert.match(oauthCallbackRoute, /oauth_denied/);
-  assert.match(oauthCallbackRoute, /oauth_expired/);
-  assert.match(oauthCallbackRoute, /oauth_already_linked/);
-  assert.match(oauthCallbackRoute, /oauth_email_taken/);
-  assert.match(oauthCallbackRoute, /Referrer-Policy": "no-referrer/);
-  assert.doesNotMatch(oauthCallbackRoute, /hasSameOrigin/);
-  // Strict id_token validation in the provider module.
-  assert.match(oauthGoogleModule, /header\.alg !== "RS256"/);
-  assert.match(oauthGoogleModule, /payload\.email_verified !== true/);
-  assert.match(oauthGoogleModule, /GOOGLE_ISSUER/);
+test("Google OAuth removed: table and lookup dropped, scopes removed (0047)", () => {
+  // 0032 stays untouched as history; 0047 is the removal, never an
+  // edit to 0032. The table and its lookup function go away, and
+  // the oauth scopes leave BOTH allowlists (the 0023 lesson) while
+  // every other scope from 0036 survives verbatim.
+  assert.match(oauthRemoval, /DROP FUNCTION IF EXISTS nexora\.lookup_oauth_identity\(text, text\)/);
+  assert.match(oauthRemoval, /DROP TABLE IF EXISTS nexora\.oauth_identities/);
+  assert.match(oauthRemoval, /DELETE FROM nexora\.auth_rate_limits WHERE scope IN \('oauth-start', 'oauth-callback'\)/);
+  assert.match(oauthRemoval, /DROP CONSTRAINT auth_rate_scope/);
+  assert.match(oauthRemoval, /ADD CONSTRAINT auth_rate_scope CHECK/);
+  assert.match(oauthRemoval, /CREATE OR REPLACE FUNCTION nexora\.consume_auth_rate_limit/);
+  // Indented list entries only: the header comment and the DELETE
+  // of leftover buckets legitimately name the removed scopes.
+  assert.doesNotMatch(oauthRemoval, /\n    'oauth-start',/);
+  assert.doesNotMatch(oauthRemoval, /\n      'oauth-start',/);
+  assert.doesNotMatch(oauthRemoval, /\n    'oauth-callback'/);
+  assert.doesNotMatch(oauthRemoval, /\n      'oauth-callback',/);
+  assert.match(oauthRemoval, /'realtime-connect-user'/);
+  assert.match(oauthRemoval, /'ai-request-user'/);
+  // No OAuth grant survives in the runtime grants.
+  assert.doesNotMatch(grants, /oauth_identities/);
+  assert.doesNotMatch(grants, /lookup_oauth_identity/);
+  // No OAuth code survives in the server DB helper.
+  assert.doesNotMatch(databaseBoundary, /oauth/i);
 });
 
 test("organization soft delete keeps audit, purges children, and keeps the tombstone (0033)", () => {
@@ -539,7 +504,10 @@ test("organization soft delete keeps audit, purges children, and keeps the tombs
   // are still counted by the cleanup command.
   assert.match(organizationSoftDelete, /RETURN QUERY SELECT expired_org\.id, NULL::uuid/);
   // Grants for the new columns and functions, column-scoped.
-  assert.match(grants, /UPDATE \(name, slug, status, deleted_at, deleted_by_user_id, purged_at\)\s+ON TABLE nexora\.organizations TO nexora_app;/);
+  // Updated 2026-10-26 for migration 0046: the organization
+  // storage quota column is granted for UPDATE alongside the
+  // original columns (no column was removed).
+  assert.match(grants, /UPDATE \(name, slug, status, storage_quota_bytes, deleted_at, deleted_by_user_id, purged_at\)\s+ON TABLE nexora\.organizations TO nexora_app;/);
   assert.match(grants, /GRANT EXECUTE ON FUNCTION nexora\.purge_expired_organizations\(\) TO nexora_app;/);
   assert.match(grants, /GRANT EXECUTE ON FUNCTION nexora\.list_expired_organizations\(\) TO nexora_app;/);
   // Deletion rate-limit scope in both allowlists (the 0023 lesson).

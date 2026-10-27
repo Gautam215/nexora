@@ -29,7 +29,8 @@ import {
   type PublicTaskFile,
   type TaskFileRecord,
 } from "../../../../../../../../../server/task-files.ts";
-import { writePrivateFile, removePrivateFile } from "../../../../../../../../../server/private-file-storage.ts";
+import { removeObject, writeObject } from "../../../../../../../../../server/storage.ts";
+import { scanFileForUpload } from "../../../../../../../../../server/malware.ts";
 
 export const runtime = "nodejs";
 
@@ -53,7 +54,7 @@ async function readFileRows(
   const result = await transaction.query<TaskFileRecord>(
     `SELECT file.id, file.organization_id, file.project_id, file.task_id,
             file.original_filename, file.mime_type, file.byte_size::text AS byte_size,
-            file.sha256, file.storage_key, file.uploaded_by_user_id, file.version,
+            file.sha256, file.storage_key, file.uploaded_by_user_id, file.scan_status, file.version,
             file.created_at, file.updated_at, file.deleted_at, file.deleted_by_user_id,
             uploader.display_name AS uploaded_by_name
      FROM nexora.task_files AS file
@@ -156,7 +157,10 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       sha256: digest,
     })).digest("hex");
 
-    await writePrivateFile(storageKey, body.bytes);
+    await writeObject(storageKey, body.bytes);
+    // Scan after staging so a quarantined file still has a row
+    // and bytes an operator can inspect, but is never downloadable.
+    const scanStatus = await scanFileForUpload(body.bytes);
     let stagedStorageKey: string | null = storageKey;
     try {
       const result = await withOrganizationContext(
@@ -213,18 +217,36 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
           const currentBytes = Number(usage.rows[0]?.byte_count ?? 0);
           if (currentCount >= MAX_TASK_FILE_COUNT) return { kind: "file_count_limit" as const };
           if (currentBytes + body.bytes.byteLength > MAX_TASK_FILE_BYTES) return { kind: "task_size_limit" as const };
+          // Organization quota (NULL = no cap). Checked in the
+          // same transaction, after the task-graph lock, so two
+          // concurrent uploads cannot both pass a quota that
+          // only one of them fits under.
+          const orgQuota = await transaction.query<{ quota: string | null; used: string }>(
+            `SELECT organization.storage_quota_bytes::text AS quota,
+                    (SELECT COALESCE(sum(byte_size), 0)::text FROM nexora.task_files
+                     WHERE organization_id = $1 AND deleted_at IS NULL) AS used
+             FROM nexora.organizations AS organization
+             WHERE organization.id = $1`,
+            [organizationId],
+          );
+          const quotaRow = orgQuota.rows[0];
+          if (quotaRow?.quota !== null && quotaRow?.quota !== undefined) {
+            const quotaBytes = Number(quotaRow.quota);
+            const usedBytes = Number(quotaRow.used ?? 0);
+            if (usedBytes + body.bytes.byteLength > quotaBytes) return { kind: "organization_storage_limit" as const };
+          }
 
           const inserted = await transaction.query<TaskFileRecord>(
             `INSERT INTO nexora.task_files
                (id, organization_id, project_id, task_id, original_filename,
-                mime_type, byte_size, sha256, storage_key, uploaded_by_user_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                mime_type, byte_size, sha256, storage_key, uploaded_by_user_id, scan_status)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
              RETURNING id, organization_id, project_id, task_id, original_filename,
                        mime_type, byte_size::text AS byte_size, sha256, storage_key,
-                       uploaded_by_user_id, version, created_at, updated_at,
+                       uploaded_by_user_id, scan_status, version, created_at, updated_at,
                        deleted_at, deleted_by_user_id`,
             [fileId, organizationId, projectId, taskId, validation.filename, validation.mimeType,
-              body.bytes.byteLength, digest, storageKey, principal.userId],
+              body.bytes.byteLength, digest, storageKey, principal.userId, scanStatus],
           );
           const fileRecord = inserted.rows[0];
           if (!fileRecord) throw new Error("Uploaded file metadata could not be read");
@@ -260,7 +282,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       );
 
       if (result.kind !== "created") {
-        await removePrivateFile(storageKey);
+        await removeObject(storageKey);
         stagedStorageKey = null;
       }
       if (result.kind === "not_found") return jsonError(request, 404, "TASK_NOT_FOUND", "Task not found.");
@@ -271,12 +293,13 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       if (result.kind === "idempotency_conflict") return jsonError(request, 409, "IDEMPOTENCY_KEY_REUSED", "Use a new idempotency key for different file contents.");
       if (result.kind === "file_count_limit") return jsonError(request, 409, "TASK_FILE_COUNT_LIMIT", "A task can have at most 20 active files.");
       if (result.kind === "task_size_limit") return jsonError(request, 409, "TASK_FILE_STORAGE_LIMIT", "A task can use at most 100 MB of active files.");
+      if (result.kind === "organization_storage_limit") return jsonError(request, 409, "ORGANIZATION_STORAGE_LIMIT", "This workspace has reached its storage quota.");
       if (result.kind === "replayed") return jsonOk(request, { file: result.file }, result.status);
       stagedStorageKey = null;
       return jsonOk(request, { file: result.file }, 201);
     } catch (error) {
       if (stagedStorageKey && !(error instanceof TransactionCommitOutcomeUnknown)) {
-        await removePrivateFile(stagedStorageKey).catch(() => undefined);
+        await removeObject(stagedStorageKey).catch(() => undefined);
       }
       throw error;
     }
