@@ -26,6 +26,22 @@ Production liveness probe (2026-10-28, health + ready only,
 ~324 ms, p95 ~1.2 s. These numbers include serverless cold
 starts. They are liveness, NOT performance acceptance.
 
+Step 1 measurement (2026-10-28, disposable local DB, migrator
+role, freshly migrated 0001–0062, seeded 10x: 2000
+organizations, 5000 projects, 50000 tasks, 20000 task files,
+50000 notifications): sequential p95 — list_projects 6.11 ms,
+list_tasks 44.91 ms, search_files_by_name 1.30 ms,
+list_notifications 2.08 ms, org_storage_usage 7.36 ms — all
+under the proposed 100 ms gate. Production liveness re-probe
+on current code (bf42d788): 50/50 success, p95 ~2.65 s, under
+the proposed 5 s gate. Caveats, recorded not hidden: the
+concurrent phase (10 workers × 20) puts list_tasks p95 at
+190.94 ms, above 100 ms — per the threshold mapping below
+this is an index/query-review signal; and notification counts
+read 0 under the migrator session (FORCE RLS shape-check
+caveat, same as round 4). Gate values remain PROPOSED until
+the user approves them; Step 1 is measured, not accepted.
+
 ## Scale steps (measurement gates, not promises)
 
 Run `scripts/seed-benchmark-dataset.mjs` at each step, then
