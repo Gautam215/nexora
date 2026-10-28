@@ -140,6 +140,18 @@ the model. No application code is included here.
   `id`: `audit_events.id` has no default, so 0058's insert
   failed every deletion with 23502. 0058 itself is not
   edited.
+- **Migration 0062 (2026-10-28 milestone trigger,
+  correction):** redefines
+  `guard_milestone_task_consistency()` identically to 0008.
+  Production's copy had diverged: its third EXISTS block
+  joined `milestones` to itself under one alias instead of
+  joining `milestone_dependencies`, so every milestone status
+  UPDATE failed with 42712. 0008 itself is not edited.
+  Milestone and project DATE columns are returned with
+  `::text` (following the existing task `due_date::text`
+  precedent) so edit forms receive YYYY-MM-DD strings
+  instead of timestamp strings that date inputs render
+  blank.
 - **Not used:** Redis, a queue store, or a separate analytics store.
   Rate limits, idempotency, and notifications are PostgreSQL tables.
   Task-file bytes are not in the database; only their metadata is (see
