@@ -308,7 +308,23 @@ choices:
   malware protection is operational until a real clamd is
   configured and `scripts/rescan-task-files.mjs` has cleared the
   pending/quarantined backlog; the ClamAV adapter is unit-tested
-  against a fake clamd only.
+  against a fake clamd only. Enabling in production (2026-10-28
+  note): set `NEXORA_MALWARE_SCANNER=clamav`,
+  `NEXORA_CLAMAV_HOST`, and `NEXORA_CLAMAV_PORT` in Vercel
+  Production and redeploy. Two constraints the operator must
+  accept first: (1) the adapter speaks plain TCP with no TLS, so
+  the endpoint must be reachable over private networking from
+  Vercel functions — pointing it at a public clamd would send
+  file bytes unencrypted over the internet; (2) Vercel functions
+  have no local clamd, so the `127.0.0.1:3310` defaults do not
+  work there — a sidecar, VM, or VPC endpoint is required.
+  Current production state (2026-10-28): no scanner is
+  configured, so uploads are recorded `pending` and remain
+  downloadable (only `quarantined` blocks download with 409);
+  after enabling, run `scripts/rescan-task-files.mjs` with
+  `MIGRATOR_DATABASE_URL` (direct Neon endpoint, migrator role;
+  it cannot run from a host whose direct Neon TCP is blocked)
+  to clear the backlog.
 - **Organization storage budgets:** upload caps exist per task
   (10 MB/file, 20 files, 100 MB/task); organization-level budgets and
   usage tracking need budget numbers before implementation.

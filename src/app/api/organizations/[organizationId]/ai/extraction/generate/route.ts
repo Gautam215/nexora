@@ -48,7 +48,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     );
     const prompt = buildAiPrompt(
       "extraction",
-      `Extract tasks, decisions, follow-ups, and risks from the meeting notes. Respond with JSON only, with this exact shape: { "tasks": [{ "title": string, "owner"?: string | null, "deadline"?: string | null }], "decisions": string[], "followUps": string[], "risks": string[] }. Owner and deadline are text exactly as stated in the notes, or null; never invent them.`,
+      `Extract tasks, decisions, follow-ups, and risks from the meeting notes. Respond with JSON only, with this exact shape: { "tasks": [{ "title": string, "owner"?: string | null, "deadline"?: string | null }], "decisions": string[], "followUps": string[], "risks": string[] }. Owner and deadline are text exactly as stated in the notes, or null; never invent them. Every actionable follow-up must also appear as a task in tasks[] (with its owner and deadline as text); decisions and risks stay in their own lists and are not tasks.`,
       redactSecrets(parsed.value.notes),
     );
     const startedAt = Date.now();

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { NextRequest } from "next/server.js";
 import test from "node:test";
+import { AiProviderError } from "../src/server/ai/provider.ts";
 import { emailSchema } from "../src/security/auth-schemas.ts";
 import { hasSameOrigin, jsonOk, jsonServerFailure, parseJson } from "../src/server/api.ts";
 
@@ -153,4 +154,35 @@ test("failure logs carry timestamp, severity, and service fields", async () => {
   const second = JSON.parse(lines[1] as string) as Record<string, unknown>;
   assert.equal(second.errorCode, "23505");
   assert.equal(second.requestId, "test-request-log-02");
+});
+
+test("failure logs carry AI provider error codes", async () => {
+  const originalError = console.error;
+  const lines: string[] = [];
+  console.error = (...args: unknown[]) => {
+    lines.push(args.map(String).join(" "));
+  };
+  try {
+    const request = new NextRequest(`${origin}/api`, {
+      headers: { "x-request-id": "test-request-log-ai" },
+    });
+    const response = jsonServerFailure(
+      request,
+      "test.log-ai-code",
+      new AiProviderError("INVALID_OUTPUT"),
+    );
+    assert.equal(response.status, 500);
+  } finally {
+    console.error = originalError;
+  }
+
+  assert.equal(lines.length, 1);
+  const logged = JSON.parse(lines[0] as string) as Record<string, unknown>;
+  assert.equal(logged.event, "api.request_failed");
+  assert.equal(logged.operation, "test.log-ai-code");
+  assert.equal(logged.requestId, "test-request-log-ai");
+  assert.equal(logged.errorName, "AiProviderError");
+  // Previously the 12-character code bound dropped every AI provider
+  // code (longest 20 chars), so ai.risk failures logged no sub-code.
+  assert.equal(logged.errorCode, "INVALID_OUTPUT");
 });

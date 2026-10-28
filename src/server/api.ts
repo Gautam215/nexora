@@ -71,12 +71,15 @@ export function logRouteFailure(
   error: unknown,
 ): void {
   const errorName = error instanceof Error ? error.name : "UnknownError";
-  const databaseCode =
+  // Bounded error code for the log line: database codes (e.g. 23505)
+  // and AI provider codes (longest 20 chars, e.g. PROVIDER_UNAVAILABLE).
+  // Anything else is omitted rather than logged verbatim.
+  const errorCode =
     typeof error === "object" &&
     error !== null &&
     "code" in error &&
     typeof error.code === "string" &&
-    /^[A-Za-z0-9_]{1,12}$/.test(error.code)
+    /^[A-Za-z0-9_]{1,24}$/.test(error.code)
       ? error.code
       : undefined;
   console.error(
@@ -88,7 +91,7 @@ export function logRouteFailure(
       operation,
       requestId: requestId(request),
       errorName,
-      ...(databaseCode ? { errorCode: databaseCode } : {}),
+      ...(errorCode ? { errorCode } : {}),
     }),
   );
 }
