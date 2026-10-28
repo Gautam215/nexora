@@ -22,6 +22,15 @@ const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{
 const REPLAY_WINDOW = 200;
 const POLL_MS = 2000;
 const HEARTBEAT_MS = 15000;
+// Vercel kills a function at 300 s, which the platform logs as a
+// timeout error even though EventSource would reconnect anyway.
+// End the stream cleanly just before that limit so the client
+// reconnects on its own and no timeout error is logged. Read per
+// stream (not at module load) so the env override can be set by
+// tests; it exists only so tests can observe the close quickly.
+function streamMaxMs(): number {
+  return Number(process.env.NEXORA_REALTIME_STREAM_MAX_MS) || 270_000;
+}
 
 interface RouteContext {
   params: Promise<{ organizationId: string; projectId: string }>;
@@ -110,6 +119,9 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
         const send = (text: string) => {
           if (!closed) controller.enqueue(encoder.encode(text));
         };
+        // Declared before close() so an abort during setup cannot
+        // leave this timer running after the stream is gone.
+        let streamTimer: ReturnType<typeof setTimeout> | undefined;
         const sendEvent = (event: RealtimeEventRow) => {
           send(
             `id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify({ ...event.data, version: event.version, projectId })}\n\n`,
@@ -124,6 +136,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
           if (presenceJoined) presenceRegistry.leave(organizationId, projectId, principal.userId);
           clearInterval(pollTimer);
           clearInterval(heartbeatTimer);
+          if (streamTimer !== undefined) clearTimeout(streamTimer);
           try {
             controller.close();
           } catch {
@@ -163,6 +176,9 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
         const heartbeatTimer = setInterval(() => {
           send(": heartbeat\n\n");
         }, HEARTBEAT_MS);
+        // Clean close before the platform limit: EventSource
+        // reconnects automatically and replays from last-event-id.
+        streamTimer = setTimeout(close, streamMaxMs());
 
         void (async () => {
           try {

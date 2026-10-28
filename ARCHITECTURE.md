@@ -361,6 +361,11 @@ The shape below is enforced by the code, not aspirational:
   `resync` event and refetches state instead of a flood. The client
   never rewrites page state from events: it shows a refresh notice,
   so no silent overwrite of newer authoritative data is possible.
+  The server ends each stream cleanly at 270 s (below Vercel's
+  300 s function limit) so the platform never logs a timeout
+  error for a healthy stream; the client reconnects on its own
+  and replays from its last event id. `NEXORA_REALTIME_STREAM_MAX_MS`
+  overrides the limit for tests only.
 - **Event set (v1):** `task.created`, `task.updated`,
   `task.deleted` (fired when a task is archived — archiving is this
   codebase's task deletion), `comment.created`, `project.updated`.

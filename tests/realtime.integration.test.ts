@@ -419,3 +419,66 @@ test(
     }
   },
 );
+
+test(
+  "realtime stream ends cleanly at the configured maximum duration",
+  { skip: !connectionString },
+  async () => {
+    // The first test in this file already started the capture
+    // server; a second one in the same process would receive
+    // nothing, so reuse it when it exists.
+    if (!smtp) {
+      smtp = await startSmtpCaptureServer();
+      process.env.SMTP_HOST = "127.0.0.1";
+      process.env.SMTP_FROM = "noreply@nexora.example.test";
+      process.env.SMTP_PORT = String(smtp.port);
+      process.env.SMTP_SECURE = "false";
+      process.env.SMTP_REQUIRE_TLS = "false";
+      process.env.SMTP_USER = "";
+      process.env.SMTP_PASSWORD = "";
+    }
+    process.env.NEXORA_REALTIME_STREAM_MAX_MS = "300";
+    const controller = new AbortController();
+    try {
+      const owner = await registerVerifyAndLogin("rt-owner2@example.test", "RT Owner 2", "correct horse battery staple");
+      const orgResponse = await createOrganization(
+        apiRequest("/api/organizations", "POST", { name: "RT Workspace 2", slug: "rt-workspace-2" }, owner.cookie),
+      );
+      assert.equal(orgResponse.status, 201);
+      const orgId = ((await orgResponse.json()) as { data: { organization: { id: string } } }).data.organization.id;
+      const projectResponse = await createProject(
+        apiRequest(`/api/organizations/${orgId}/projects`, "POST", { name: "RT Project 2" }, owner.cookie),
+        { params: Promise.resolve({ organizationId: orgId }) },
+      );
+      assert.equal(projectResponse.status, 201);
+      const projectId = ((await projectResponse.json()) as { data: { project: { id: string } } }).data.project.id;
+      const response = await openStream(
+        new NextRequest(`${origin}/api/organizations/${orgId}/projects/${projectId}/realtime/stream`, {
+          headers: { cookie: owner.cookie },
+          signal: controller.signal,
+        }),
+        { params: Promise.resolve({ organizationId: orgId, projectId }) },
+      );
+      assert.equal(response.status, 200);
+      const reader = response.body?.getReader();
+      assert.ok(reader);
+      let done = false;
+      const deadline = Date.now() + 10_000;
+      try {
+        while (Date.now() < deadline) {
+          const result = await reader.read();
+          if (result.done) {
+            done = true;
+            break;
+          }
+        }
+      } finally {
+        await reader.cancel().catch(() => undefined);
+      }
+      assert.equal(done, true, "stream should end on its own at the configured maximum duration");
+    } finally {
+      delete process.env.NEXORA_REALTIME_STREAM_MAX_MS;
+      controller.abort();
+    }
+  },
+);
