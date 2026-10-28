@@ -74,6 +74,20 @@ function requireNeonSsl(connectionString: string): void {
   }
 }
 
+// pg's connection-string parser warns (to stderr, which Vercel
+// counts as an error) that sslmode=require is an alias for
+// verify-full. Stating verify-full explicitly is the same
+// behaviour today, stated plainly, so the warning never fires.
+// Only the query part is rewritten, never credentials, and the
+// Neon sslmode presence check above still runs on the original.
+export function normalizeDatabaseConnectionString(connectionString: string): string {
+  const queryIndex = connectionString.indexOf("?");
+  if (queryIndex === -1) return connectionString;
+  const base = connectionString.slice(0, queryIndex);
+  const query = connectionString.slice(queryIndex + 1).replace("sslmode=require", "sslmode=verify-full");
+  return `${base}?${query}`;
+}
+
 function getPool(): Pool {
   if (globalForDatabase.nexoraPool) return globalForDatabase.nexoraPool;
 
@@ -83,7 +97,7 @@ function getPool(): Pool {
 
   const isNeon = isNeonConnectionString(connectionString);
   const pool = new Pool({
-    connectionString,
+    connectionString: normalizeDatabaseConnectionString(connectionString),
     application_name: "nexora-web",
     max: 12,
     // Neon computes scale to zero and need a TLS handshake plus a wake-up

@@ -167,6 +167,11 @@ A typical tenant request flows like this:
   30 s idle timeout, 10 s statement timeout, 12 s query timeout, and an
   `error` listener so a dead idle client is logged and discarded instead
   of crashing the process. `application_name` is `nexora-web`.
+  Before the pool is created, `sslmode=require` in the connection
+  string is rewritten to `sslmode=verify-full` (query part only,
+  credentials untouched): the same behaviour pg already applies,
+  stated explicitly, so pg's deprecation warning never reaches
+  stderr where Vercel counts it as an error.
 - **Roles:** Two database roles, never one. `MIGRATOR_DATABASE_URL` is the
   schema owner/migration role; `DATABASE_URL` is the restricted runtime
   role, which owns no tables and has no `BYPASSRLS`, `CREATEROLE`, or
