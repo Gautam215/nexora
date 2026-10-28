@@ -19,7 +19,9 @@ interface TaskComment {
   id: string;
   body: string;
   created_at: Date;
+  author_user_id: string;
   author_name: string | null;
+  can_delete: boolean;
   mentions: Array<{ user_id: string; display_name: string }>;
 }
 
@@ -74,7 +76,10 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
           `SELECT recent.id,
                   recent.body,
                   recent.created_at,
+                  recent.author_user_id,
                   author.display_name AS author_name,
+                  (recent.author_user_id = $6
+                     OR nexora.can_manage_current_project($1, $2)) AS can_delete,
                   mention_list.mentions
            FROM (
               SELECT comment.id, comment.body, comment.created_at, comment.author_user_id
@@ -82,6 +87,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
               WHERE comment.organization_id = $1
                 AND comment.project_id = $2
                 AND comment.task_id = $3
+                AND comment.deleted_at IS NULL
               ORDER BY comment.created_at DESC, comment.id DESC
               LIMIT $4 OFFSET $5
            ) AS recent
@@ -115,7 +121,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
                AND mention.comment_id = recent.id
            ) AS mention_list ON true
            ORDER BY recent.created_at ASC, recent.id ASC`,
-          [organizationId, projectId, taskId, pagination.limit + 1, pagination.offset],
+          [organizationId, projectId, taskId, pagination.limit + 1, pagination.offset, principal.userId],
         );
         const hasMore = rows.rows.length > pagination.limit;
         return {

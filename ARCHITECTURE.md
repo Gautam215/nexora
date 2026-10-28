@@ -35,6 +35,22 @@ own operating manual).
 - **Data fetching:** Pages and route handlers read from PostgreSQL through
   `src/server/`. There is no client-side data layer, no SWR-style cache,
   and no client state store. Pagination is server-side and bounded.
+- **Caching and revalidation (PRD 35, decided 2026-10-28):** there
+  is no application cache to invalidate, by design. Authenticated
+  pages are dynamic: every data fetch uses `cache: "no-store"`,
+  so the server is authoritative on every request and a role
+  change, removal, or disable takes effect on the next load
+  without a revalidation protocol. API responses set
+  `cache-control: no-store` in the shared JSON helpers, so no
+  browser or proxy may serve a stale authorized response. The
+  only caching in the system is Next.js's own static-asset
+  handling: hashed `_next/static` chunks are immutable and
+  long-lived, which is safe because their content is addressed
+  by hash, not by URL. There is no CDN page cache, no
+  server-side rendered-page cache, and no manual invalidation
+  list — adding any of them would need a per-route
+  authorization review first, because a cached authorized page
+  is a privilege leak waiting for a stale entry.
 - **Components:** One component per screen or panel, in
   `src/app/components/`, following `DESIGN.md`. Components are reused across
   screens; a new screen reuses an existing component before creating one.
@@ -470,6 +486,97 @@ externally instead of reading one process; (4) only then run
 two instances and verify rosters, metrics, and file downloads
 across both. Until then, horizontal scaling means a larger
 single instance, not more instances.
+
+## 9c-2. Queue and durable-storage decisions (PRD 34, decided 2026-10-28)
+
+- **The queue is PostgreSQL.** There is no separate queue
+  store (no Redis, no SQS, no in-process job list). The
+  notification-email outbox (`notification_email_outbox`,
+  migrations 0040–0043) is the queue: rows are claimed by a
+  SECURITY DEFINER function, attempted with backoff, and
+  marked failed after 5 attempts. Scheduled jobs are claimed
+  the same way in `scheduled_job_runs`. This is consistent
+  with the single-instance decision above: one writer, one
+  claim function, no distributed coordination to get wrong.
+  A separate queue becomes justified only if the reversal
+  path in §9c is taken.
+- **Durable storage migration is N/A for production.**
+  Production never stored file bytes locally: the first
+  production files went directly to Backblaze B2 (2026-10-28,
+  verified upload/download). There is no local-to-S3 copy to
+  run for the deployed app, and no migration is claimed. For
+  a self-hosted instance that did store files locally, the
+  migration is manual and un-automated: copy each object to
+  the new provider, verify bytes, then flip
+  `NEXORA_STORAGE_PROVIDER` — the app has no copy command,
+  and `scripts/cleanup-task-files.mjs` only reports orphans,
+  it does not move them.
+- **Provider switch strands objects.** File rows record the
+  storage key, not the provider; switching
+  `NEXORA_STORAGE_PROVIDER` (or the bucket/endpoint) on a
+  live instance without copying the objects first breaks
+  every existing download (the new provider has no such
+  key). Do not switch providers on an instance with files
+  unless the objects have been copied and a download
+  re-verified first. This is a documented manual procedure,
+  not an automated migration, and the runbook says so.
+
+## 9d. Operational auto-healing (PRD 31, implemented 2026-10-28)
+
+Bounded auto-healing only. The forbidden list is honored by
+construction: no healing action modifies source code, database
+schema, permissions, security policies, or secrets, and no
+self-modifying AI exists. What exists, and where:
+
+- **Healing cron job** (`GET /api/cron/healing`, daily 06:00 UTC
+  in `vercel.json`, migration 0051): purges expired sessions
+  via `nexora.purge_expired_sessions()`. Expired sessions
+  cannot authenticate, so the purge changes no live session.
+  One `scheduled_job_runs` row per day (replay on second call,
+  retry after failure), token-gated like the other jobs.
+  `NEXORA_HEALING_DISABLED=1` records "disabled by operator"
+  and purges nothing; any token holder can also trigger the
+  job on demand outside the schedule.
+- **Transient retries** (pre-existing): the AI provider retries
+  once on 429/502/503/504; the notification-email outbox
+  retries with backoff and marks a row permanently failed
+  after 5 attempts.
+- **Queue-job recovery** (pre-existing): a crashed scheduled
+  job leaves its claim row `failed`/`in progress`, and the
+  next call replaces that claim and reruns instead of
+  blocking the day.
+- **AI circuit breaker** (`src/server/ai/circuit-breaker.ts`):
+  after 5 consecutive HTTP-provider failures the breaker
+  opens and AI calls fail fast with 503 `AI_FAILED` for a
+  60-second cooldown, then admits one probe (success closes,
+  failure reopens). Per-process state, like presence: one
+  instance's open breaker does not stop another instance's
+  requests, and every instance still fails closed. Openings
+  are counted in `GET /api/metrics` (`ai.circuitOpens`) and
+  logged as JSON events. `NEXORA_AI_CIRCUIT_BREAKER_DISABLED=1`
+  disables it. The mock provider is never wrapped.
+- **Graceful degradation** (pre-existing): unconfigured or
+  failing AI answers 503 with a controlled UI failure, never
+  a fabricated result; the application stays usable without
+  AI (PRD 41).
+- **Deliberately not built here:** presence cleanup needs no
+  job — presence is per-process memory, cleared on stream
+  close, and any process (and its roster) dies with Vercel's
+  300s stream limit at the latest, so a stale roster entry
+  cannot outlive 300 seconds. Storage-object recovery stays
+  with `scripts/cleanup-task-files.mjs`, which reports
+  orphans; the healing job cannot invent the keys of objects
+  whose database rows were already purged. Process restart
+  and instance replacement are the platform's job on
+  serverless, not application code.
+
+A failed healing run finishes as `failed` in
+`scheduled_job_runs` AND rethrows, so the cron route answers
+500, metrics count a server error, and the alerts job can
+fire on its threshold — that is the alerting-aware property.
+Live verification of the healing job needs a deployed run
+(manual token-gated trigger works the same day; the
+scheduled run follows at 06:00 UTC).
 
 ## 10. Environment configuration
 

@@ -89,6 +89,15 @@ exists to base them on. Thresholds are system signals:
    a Pro upgrade or an external header-capable caller, with no
    code change.
 
+## What approval of this plan means (bounded)
+
+Approving this plan approves ONLY: the Step 1 gate values, the
+threshold-to-review mapping above, and the lever order. It does
+NOT approve: a Redis design, a Vercel Pro upgrade, any production
+performance target, or any automatic scaling action — thresholds
+trigger a review, never an automatic change. Those remain separate
+decisions, each needing its own approval.
+
 ## Explicitly open (not decided by this draft)
 
 - Production dataset and approved performance targets

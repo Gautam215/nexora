@@ -26,7 +26,22 @@ interface RouteContext {
 // labelled aiGenerated in the response, and the UI must render that
 // label (PRD 21). The provider call runs outside any transaction;
 // the execution record is started before it and completed after it
-// (see src/server/ai/execution.ts).
+// (see src/server/ai/execution.ts). Scope selects which section the
+// summary focuses on; the context is always the same authorized
+// project context (the scope is a focus instruction, not a context
+// filter), and "project" (the default) covers all sections.
+const SUMMARY_SCOPE_TASKS: Record<string, string> = {
+  project:
+    "Summarize this project's current status: progress, milestones, overdue work, and recent activity. Keep it concise.",
+  tasks:
+    "Summarize this project's tasks only: statuses, priorities, due dates, assignees, and the milestones they belong to. Do not summarize comments, activity, or milestones themselves. Keep it concise.",
+  comments:
+    "Summarize this project's recent comments only: what was discussed, on which tasks, and any decisions or concerns raised. Do not summarize tasks, activity, or milestones themselves. Keep it concise.",
+  activity:
+    "Summarize this project's recent activity only: what changed and who did it. Do not summarize tasks, comments, or milestones themselves. Keep it concise.",
+  milestones:
+    "Summarize this project's milestones only: names, statuses, and target dates, and how they relate to progress. Do not summarize tasks, comments, or activity themselves. Keep it concise.",
+};
 export async function POST(request: NextRequest, { params }: RouteContext) {
   if (!hasSameOrigin(request)) {
     return jsonError(request, 403, "FORBIDDEN_ORIGIN", "Request origin is not allowed.");
@@ -61,6 +76,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     if (!context) {
       return jsonError(request, 404, "PROJECT_NOT_FOUND", "Project not found.");
     }
+    const scope = parsed.value.scope ?? "project";
     const executionId = await startAiExecution(
       principal.userId,
       organizationId,
@@ -71,7 +87,8 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     );
     const prompt = buildAiPrompt(
       "summarization",
-      "Summarize this project's current status: progress, milestones, overdue work, and recent activity. Keep it concise.",
+      SUMMARY_SCOPE_TASKS[scope] ??
+        "Summarize this project's current status: progress, milestones, overdue work, and recent activity. Keep it concise.",
       context.contextText,
     );
     const startedAt = Date.now();
@@ -86,7 +103,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
         completionTokens: output.completionTokens,
         latencyMs: Date.now() - startedAt,
       });
-      return jsonOk(request, { summary, aiGenerated: true, executionId });
+      return jsonOk(request, { summary, aiGenerated: true, executionId, scope });
     } catch (error) {
       const code = error instanceof AiProviderError ? error.code : "PROVIDER_REJECTED";
       try {

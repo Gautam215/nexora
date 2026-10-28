@@ -79,7 +79,9 @@ interface TaskComment {
   id: string;
   body: string;
   created_at: string;
+  author_user_id: string;
   author_name: string | null;
+  can_delete: boolean;
   mentions: Array<{ user_id: string; display_name: string }>;
 }
 
@@ -872,6 +874,8 @@ function TaskCard({
   const [mentionMemberId, setMentionMemberId] = useState("");
   const [commentKey, setCommentKey] = useState("");
   const [commentPending, setCommentPending] = useState(false);
+  const [commentDeletePending, setCommentDeletePending] = useState(false);
+  const [confirmingCommentId, setConfirmingCommentId] = useState("");
   const [detailsOpen, setDetailsOpen] = useState(false);
   const editable = canWork && task.milestone_status !== "completed";
 
@@ -944,6 +948,29 @@ function TaskCard({
       setCommentsError(reason instanceof Error ? reason.message : "Comment could not be posted.");
     } finally {
       setCommentPending(false);
+    }
+  }
+
+  async function deleteComment(commentId: string) {
+    if (commentDeletePending || comments === null) return;
+    setCommentDeletePending(true);
+    setCommentsError("");
+    try {
+      const response = await fetch(`${base}/${encodeURIComponent(task.id)}/comments/${encodeURIComponent(commentId)}`, {
+        method: "DELETE",
+      });
+      const result = (await response.json().catch(() => null)) as ApiResult<{ deleted: boolean }> | null;
+      if (response.status === 401) {
+        window.location.assign("/login");
+        return;
+      }
+      if (!response.ok || !result?.data?.deleted) throw new Error(result?.error?.message ?? "Comment could not be deleted.");
+      setComments((current) => current?.filter((comment) => comment.id !== commentId) ?? null);
+      setConfirmingCommentId("");
+    } catch (reason) {
+      setCommentsError(reason instanceof Error ? reason.message : "Comment could not be deleted.");
+    } finally {
+      setCommentDeletePending(false);
     }
   }
 
@@ -1048,6 +1075,16 @@ function TaskCard({
                   <li className="task-comment" key={comment.id}>
                     <p>{renderCommentBody(comment)}</p>
                     <small>{comment.author_name || "Project member"} - {formatDateTime(comment.created_at)}</small>
+                    {comment.can_delete && (
+                      confirmingCommentId === comment.id ? (
+                        <span className="task-comment-delete-confirm">
+                          <button className="quiet-button" type="button" onClick={() => void deleteComment(comment.id)} disabled={commentDeletePending}>Confirm delete</button>
+                          <button className="quiet-button" type="button" onClick={() => setConfirmingCommentId("")} disabled={commentDeletePending}>Cancel</button>
+                        </span>
+                      ) : (
+                        <button className="quiet-button" type="button" onClick={() => setConfirmingCommentId(comment.id)} disabled={commentDeletePending}>Delete</button>
+                      )
+                    )}
                   </li>
                 ))}
               </ol>

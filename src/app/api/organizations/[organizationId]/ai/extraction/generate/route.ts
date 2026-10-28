@@ -1,11 +1,11 @@
 import type { NextRequest } from "next/server";
 import { aiExtractionGenerateSchema, aiExtractionOutputSchema } from "../../../../../../../security/ai-schemas.ts";
-import { hasSameOrigin, jsonError, jsonOk, jsonServerFailure, parseJson } from "../../../../../../../server/api.ts";
+import { hasSameOrigin, jsonError, jsonOk, jsonServerFailure, logRouteFailure, parseJson } from "../../../../../../../server/api.ts";
 import { getAuthPrincipal } from "../../../../../../../server/auth.ts";
 import { isRateLimited } from "../../../../../../../server/auth-rate-limit.ts";
 import { buildAiPrompt, redactSecrets } from "../../../../../../../server/ai/context.ts";
 import { completeAiExecution, failAiExecution, startAiExecution } from "../../../../../../../server/ai/execution.ts";
-import { AiProviderError, resolveAiProvider } from "../../../../../../../server/ai/provider.ts";
+import { AiProviderError, parseAiJsonOutput, resolveAiProvider } from "../../../../../../../server/ai/provider.ts";
 
 export const runtime = "nodejs";
 
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       const output = await provider.generate({ ...prompt, maxOutputTokens: 4000 });
       let draftJson: unknown;
       try {
-        draftJson = JSON.parse(output.text) as unknown;
+        draftJson = parseAiJsonOutput(output.text);
       } catch {
         throw new AiProviderError("INVALID_OUTPUT");
       }
@@ -73,6 +73,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     } catch (error) {
       if (error instanceof AiProviderError) {
         await failAiExecution(principal.userId, organizationId, executionId, error.code);
+        // Parity with the other AI routes: without this call the
+        // failure never reaches the logs (the 2026-10-28 probe's two
+        // extraction failures left no log entries at all).
+        logRouteFailure(request, "ai.extraction.generate", error);
         return jsonError(request, 503, "AI_FAILED", "The AI provider could not produce a valid extraction.");
       }
       throw error;

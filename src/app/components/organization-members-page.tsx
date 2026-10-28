@@ -151,6 +151,36 @@ export default function OrganizationMembersPage({
     }
   }
 
+  const [confirmRemove, setConfirmRemove] = useState("");
+
+  async function removeMember(userId: string, self: boolean) {
+    if (confirmRemove !== userId) {
+      setConfirmRemove(userId);
+      return;
+    }
+    setConfirmRemove("");
+    setPending(userId);
+    setError("");
+    setMessage("");
+    try {
+      const response = await fetch(
+        `/api/organizations/${encodeURIComponent(organizationId)}/members/${encodeURIComponent(userId)}`,
+        { method: "DELETE" },
+      );
+      const result = (await response.json().catch(() => null)) as ApiResult<unknown> | null;
+      if (!response.ok) {
+        setError(result?.error?.message ?? "Member could not be removed.");
+        return;
+      }
+      setMessage(self ? "You left the workspace." : "Member removed.");
+      await refreshTeam();
+    } catch {
+      setError("The service could not be reached. Try again in a moment.");
+    } finally {
+      setPending("");
+    }
+  }
+
   async function revokeInvite(invitationId: string) {
     setPending(invitationId);
     setError("");
@@ -265,6 +295,25 @@ export default function OrganizationMembersPage({
                               })}
                             >
                               {member.status === "active" ? "Disable" : "Restore"}
+                            </button>
+                            <button
+                              className="danger-button"
+                              type="button"
+                              disabled={busy || Boolean(pending)}
+                              onClick={() => void removeMember(member.user_id, false)}
+                            >
+                              {confirmRemove === member.user_id ? "Confirm remove?" : "Remove"}
+                            </button>
+                          </div>
+                        ) : member.user_id === team.viewerUserId && member.role !== "owner" ? (
+                          <div className="member-controls">
+                            <button
+                              className="danger-button"
+                              type="button"
+                              disabled={busy || Boolean(pending)}
+                              onClick={() => void removeMember(member.user_id, true)}
+                            >
+                              {confirmRemove === member.user_id ? "Confirm leave?" : "Leave workspace"}
                             </button>
                           </div>
                         ) : (

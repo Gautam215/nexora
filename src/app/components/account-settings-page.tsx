@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import {
   apiErrorMessage,
   formatSessionTime,
@@ -44,8 +44,37 @@ export default function AccountSettingsPage() {
 
   const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null);
   const [confirmRevokeOthers, setConfirmRevokeOthers] = useState(false);
+  // Focus management for the sign-out confirm panels (PRD 37):
+  // opening a panel moves focus into it (autoFocus on its danger
+  // button), and closing it returns focus to the row's trigger
+  // button. The trigger button itself unmounts while its panel is
+  // open, so the return target is found through the row element,
+  // which survives the open/close swap.
+  const sessionRowRefs = useRef(new Map<string, HTMLLIElement | null>());
+  const focusReturnRowId = useRef<string | null>(null);
+  const revokeOthersTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const focusReturnOthers = useRef(false);
+  useEffect(() => {
+    if (confirmRevokeId === null && focusReturnRowId.current !== null) {
+      const rowId = focusReturnRowId.current;
+      focusReturnRowId.current = null;
+      sessionRowRefs.current.get(rowId)?.querySelector("button")?.focus();
+    }
+    if (!confirmRevokeOthers && focusReturnOthers.current) {
+      focusReturnOthers.current = false;
+      revokeOthersTriggerRef.current?.focus();
+    }
+  }, [confirmRevokeId, confirmRevokeOthers]);
   const [revokePending, setRevokePending] = useState(false);
   const [sessionsSuccess, setSessionsSuccess] = useState("");
+
+  const [exportPending, setExportPending] = useState(false);
+  const [exportError, setExportError] = useState("");
+  const [exportSuccess, setExportSuccess] = useState("");
+  const [confirmDeleteAccount, setConfirmDeleteAccount] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [deletePending, setDeletePending] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   const loadSessions = useCallback(async () => {
     setSessionsError("");
@@ -229,6 +258,74 @@ export default function AccountSettingsPage() {
   const otherSessions = sessions.filter((session) => !session.current);
   const currentSession = sessions.find((session) => session.current);
 
+  async function exportData() {
+    if (exportPending) return;
+    setExportPending(true);
+    setExportError("");
+    setExportSuccess("");
+    try {
+      const response = await fetch("/api/account/export", { cache: "no-store" });
+      const result = (await response.json().catch(() => null)) as ApiResult<{
+        export: unknown;
+        exportedAt: string;
+      }> | null;
+      if (response.status === 401) {
+        window.location.assign("/login");
+        return;
+      }
+      if (!response.ok || !result?.data?.export) {
+        setExportError(apiErrorMessage(result, "Your data could not be exported."));
+        return;
+      }
+      const blob = new Blob([JSON.stringify(result.data.export, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `nexora-export-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      setExportSuccess("Your data export has been downloaded.");
+    } catch {
+      setExportError(NETWORK_ERROR);
+    } finally {
+      setExportPending(false);
+    }
+  }
+
+  async function deleteAccount(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (deletePending) return;
+    setDeletePending(true);
+    setDeleteError("");
+    try {
+      const response = await fetch("/api/account", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ confirmation: deleteConfirmation }),
+      });
+      const result = (await response.json().catch(() => null)) as ApiResult<{
+        deleted: boolean;
+      }> | null;
+      if (response.status === 401) {
+        window.location.assign("/login");
+        return;
+      }
+      if (!response.ok || !result?.data?.deleted) {
+        setDeleteError(apiErrorMessage(result, "Your account could not be deleted."));
+        return;
+      }
+      // The server deleted every session and cleared the cookie, so
+      // the signed-in screen can no longer be used.
+      window.location.assign("/login");
+    } catch {
+      setDeleteError(NETWORK_ERROR);
+    } finally {
+      setDeletePending(false);
+    }
+  }
+
   return (
     <main className="auth-layout">
       <aside className="auth-story">
@@ -351,7 +448,13 @@ export default function AccountSettingsPage() {
                 ) : (
                   <ul className="session-list">
                     {sessions.map((session) => (
-                      <li className="session-row" key={session.id}>
+                      <li
+                        className="session-row"
+                        key={session.id}
+                        ref={(element) => {
+                          sessionRowRefs.current.set(session.id, element);
+                        }}
+                      >
                         <div className="session-details">
                           <strong>
                             {session.current ? "This session" : "Other session"}
@@ -383,6 +486,7 @@ export default function AccountSettingsPage() {
                               <button
                                 className="danger-button"
                                 type="button"
+                                autoFocus
                                 onClick={() => void revokeSession(session.id)}
                                 disabled={revokePending}
                               >
@@ -391,7 +495,10 @@ export default function AccountSettingsPage() {
                               <button
                                 className="quiet-button"
                                 type="button"
-                                onClick={() => setConfirmRevokeId(null)}
+                                onClick={() => {
+                                  focusReturnRowId.current = session.id;
+                                  setConfirmRevokeId(null);
+                                }}
                                 disabled={revokePending}
                               >
                                 Keep session
@@ -423,6 +530,7 @@ export default function AccountSettingsPage() {
                           <button
                             className="danger-button"
                             type="button"
+                            autoFocus
                             onClick={() => void revokeOthers()}
                             disabled={revokePending}
                           >
@@ -431,7 +539,10 @@ export default function AccountSettingsPage() {
                           <button
                             className="quiet-button"
                             type="button"
-                            onClick={() => setConfirmRevokeOthers(false)}
+                            onClick={() => {
+                              focusReturnOthers.current = true;
+                              setConfirmRevokeOthers(false);
+                            }}
                             disabled={revokePending}
                           >
                             Cancel
@@ -442,6 +553,7 @@ export default function AccountSettingsPage() {
                       <button
                         className="quiet-button"
                         type="button"
+                        ref={revokeOthersTriggerRef}
                         onClick={() => setConfirmRevokeOthers(true)}
                       >
                         Sign out all other sessions
@@ -453,6 +565,62 @@ export default function AccountSettingsPage() {
                   <p className="form-message form-error" role="alert">
                     Your current session is not in this list. Sign in again to continue securely.
                   </p>
+                )}
+              </section>
+              <section className="account-section" aria-labelledby="data-title">
+                <h3 id="data-title">Your data</h3>
+                <p className="account-section-copy">
+                  Download everything this account owns across workspaces: profile,
+                  workspace memberships, projects, tasks, comments, file metadata, and
+                  AI execution metadata. File contents and AI prompts are not included.
+                </p>
+                {exportError && (
+                  <p className="form-message form-error" role="alert">{exportError}</p>
+                )}
+                {exportSuccess && (
+                  <p className="form-message form-success" role="status" aria-live="polite">{exportSuccess}</p>
+                )}
+                <button className="quiet-button" type="button" onClick={() => void exportData()} disabled={exportPending}>
+                  {exportPending ? "Preparing export..." : "Download my data"}
+                </button>
+                <p className="account-section-copy">
+                  Deleting your account is permanent. Your profile is scrubbed, every
+                  workspace membership is disabled, and every session is signed out.
+                  Work you created stays attributed to a deleted account. If you are
+                  the sole owner of a workspace, delete that workspace first.
+                </p>
+                {deleteError && (
+                  <p className="form-message form-error" role="alert">{deleteError}</p>
+                )}
+                {confirmDeleteAccount ? (
+                  <form className="confirm-panel" onSubmit={deleteAccount}>
+                    <p>
+                      To delete this account, type your email address ({user?.email}) below.
+                    </p>
+                    <label className="form-field">
+                      <span>Confirm email address</span>
+                      <input
+                        type="email"
+                        value={deleteConfirmation}
+                        onChange={(event) => setDeleteConfirmation(event.target.value)}
+                        autoComplete="off"
+                        autoFocus
+                        required
+                      />
+                    </label>
+                    <div className="confirm-actions">
+                      <button className="danger-button" type="submit" disabled={deletePending}>
+                        {deletePending ? "Deleting..." : "Delete my account"}
+                      </button>
+                      <button className="quiet-button" type="button" onClick={() => setConfirmDeleteAccount(false)} disabled={deletePending}>
+                        Keep my account
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <button className="danger-button" type="button" onClick={() => setConfirmDeleteAccount(true)}>
+                    Delete my account
+                  </button>
                 )}
               </section>
             </>

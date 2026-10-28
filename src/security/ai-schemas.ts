@@ -4,8 +4,18 @@ const uuid = z
   .string()
   .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
 
+export const aiSummaryScopeSchema = z.enum(["project", "tasks", "comments", "activity", "milestones"]);
+
 export const aiSummarizeSchema = z.strictObject({
   projectId: uuid,
+  scope: aiSummaryScopeSchema.optional(),
+});
+
+// Meeting-notes summary input (PRD 20): free-text notes, same bounds
+// as the extraction input — a meeting has no project record, so this
+// workflow takes notes directly instead of a project id.
+export const aiMeetingSummarizeSchema = z.strictObject({
+  notes: z.string().trim().min(10).max(10000),
 });
 
 export const aiAssistantSchema = z.strictObject({

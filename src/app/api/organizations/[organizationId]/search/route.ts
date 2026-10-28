@@ -90,6 +90,7 @@ const SEARCH_SOURCES: Record<SearchEntityType, string> = {
       ON project.organization_id = task.organization_id
      AND project.id = task.project_id
     WHERE comment.organization_id = $1::uuid
+      AND comment.deleted_at IS NULL
       AND task.archived_at IS NULL
       AND project.deleted_at IS NULL
       AND ($3::uuid IS NULL OR comment.project_id = $3)

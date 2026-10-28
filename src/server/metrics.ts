@@ -62,6 +62,15 @@ let notificationConnectionsCurrent = 0;
 let notificationConnectionsTotal = 0;
 let notificationEventsDelivered = 0;
 
+// AI circuit-breaker openings (PRD 31): counted when the breaker
+// opens, never per rejected request, so the count is the number of
+// breaker trips, not the number of failed AI calls.
+let aiCircuitOpens = 0;
+
+export function recordAiCircuitOpen(): void {
+  aiCircuitOpens += 1;
+}
+
 export function recordNotificationConnect(): void {
   notificationConnectionsCurrent += 1;
   notificationConnectionsTotal += 1;
@@ -146,6 +155,9 @@ export interface MetricsSnapshot {
     connectionsTotal: number;
     eventsDelivered: number;
   };
+  ai: {
+    circuitOpens: number;
+  };
   paths: { path: string; count: number; success: number; clientError: number; serverError: number }[];
   failuresByOperation: { operation: string; count: number }[];
 }
@@ -164,6 +176,9 @@ export function snapshotMetrics(): MetricsSnapshot {
       connectionsCurrent: notificationConnectionsCurrent,
       connectionsTotal: notificationConnectionsTotal,
       eventsDelivered: notificationEventsDelivered,
+    },
+    ai: {
+      circuitOpens: aiCircuitOpens,
     },
     paths: [...paths.entries()]
       .map(([path, stats]) => ({ path, ...stats }))

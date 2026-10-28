@@ -12,7 +12,7 @@ import { getAuthPrincipal } from "../../../../../../../server/auth.ts";
 import { isRateLimited } from "../../../../../../../server/auth-rate-limit.ts";
 import { buildAiPrompt } from "../../../../../../../server/ai/context.ts";
 import { completeAiExecution, failAiExecution, startAiExecution } from "../../../../../../../server/ai/execution.ts";
-import { AiProviderError, resolveAiProvider } from "../../../../../../../server/ai/provider.ts";
+import { AiProviderError, parseAiJsonOutput, resolveAiProvider } from "../../../../../../../server/ai/provider.ts";
 
 export const runtime = "nodejs";
 
@@ -71,7 +71,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       const output = await provider.generate({ ...prompt, maxOutputTokens: 4000 });
       let draftJson: unknown;
       try {
-        draftJson = JSON.parse(output.text) as unknown;
+        draftJson = parseAiJsonOutput(output.text);
       } catch {
         throw new AiProviderError("INVALID_OUTPUT");
       }

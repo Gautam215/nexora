@@ -81,6 +81,36 @@ environment; the bounded read-only probe
 deployed-app comparison, and it has NOT been run against
 production in this round.
 
+## Realistic dataset WITH concurrent load — 2026-10-28, local PostgreSQL 16, disposable database
+
+Same seeded dataset as above (200 organizations, 500
+projects, 5000 tasks, 2000 task files, 5000 notifications),
+re-seeded fresh; `scripts/benchmark-queries.mjs` now runs a
+concurrent phase after the sequential one: 10 workers × 20
+iterations per query shape (200 queries per shape), pool
+raised to 12 so the workers measure database contention, not
+pool queueing. Sequential numbers reproduce the round-4 run
+within noise.
+
+| Query (concurrent 10×20) | Mean (ms) | p50 (ms) | p95 (ms) | Max (ms) |
+| --- | --- | --- | --- | --- |
+| list_projects | 5.90 | 3.26 | 12.17 | 70.39 |
+| list_tasks | 14.55 | 12.97 | 28.46 | 37.34 |
+| search_files_by_name | 5.82 | 5.46 | 14.89 | 22.75 |
+| list_notifications | 1.12 | 0.80 | 3.36 | 8.50 |
+| org_storage_usage | 2.27 | 1.90 | 4.70 | 6.44 |
+
+Reading: under 10-way concurrency every shape stays under
+30 ms at p95 on this dataset — contention roughly triples
+to quintuples the sequential cost (list_tasks p95 5.29 →
+28.46 ms) but nothing blows up, and the slowest single
+query observed was one 70 ms list_projects outlier. The
+same honest limits apply: migrator role (no tenant RLS
+filtering on most shapes, notifications at 0 visible rows),
+local hardware, and no deployed-environment measurement.
+This closes the "no concurrency" gap of the round-4 run; it
+does not close the production-acceptance gap.
+
 ## Timeout, retry, and circuit-breaker inventory
 
 - Database pool: statement timeout 10 s, query timeout 12 s
@@ -90,11 +120,13 @@ production in this round.
   transient HTTP 429/502/503/504, with a short backoff honouring
   Retry-After up to 5 s. Timeouts and network errors are not
   retried (a timed-out generation may still be running
-  provider-side). No circuit breaker: with one retry and a
-  30-second timeout a failing provider already fails closed
-  fast, and a breaker would need shared state across processes
-  that this codebase does not have (all counters are
-  process-local, including /api/metrics).
+  provider-side). Circuit breaker (2026-10-28 healing round,
+  `src/server/ai/circuit-breaker.ts`): 5 consecutive
+  HTTP-provider failures open the breaker for 60 s (one probe
+  after cooldown); the mock provider is never wrapped.
+  Openings are counted in `/api/metrics` as `ai.circuitOpens`.
+  The breaker is process-local, like all counters here, so it
+  bounds one process's failure storm, not a fleet-wide one.
 - SMTP: 5 s greeting, 5 s connection, 10 s socket timeouts.
   Notification email delivery retries through the outbox
   (attempts × 5 minutes backoff, max 5 attempts, then failed),

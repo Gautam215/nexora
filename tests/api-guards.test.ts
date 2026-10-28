@@ -3,7 +3,7 @@ import { NextRequest } from "next/server.js";
 import test from "node:test";
 import { AiProviderError } from "../src/server/ai/provider.ts";
 import { emailSchema } from "../src/security/auth-schemas.ts";
-import { hasSameOrigin, jsonOk, jsonServerFailure, parseJson } from "../src/server/api.ts";
+import { hasSameOrigin, jsonOk, jsonServerFailure, logRouteFailure, parseJson } from "../src/server/api.ts";
 
 const origin = "https://nexora.example.test";
 const runtimeEnvironment = process.env as unknown as Record<string, string | undefined>;
@@ -185,4 +185,32 @@ test("failure logs carry AI provider error codes", async () => {
   // Previously the 12-character code bound dropped every AI provider
   // code (longest 20 chars), so ai.risk failures logged no sub-code.
   assert.equal(logged.errorCode, "INVALID_OUTPUT");
+});
+
+test("failure logs carry structured details without overriding core fields", async () => {
+  const originalError = console.error;
+  const lines: string[] = [];
+  console.error = (...args: unknown[]) => {
+    lines.push(args.map(String).join(" "));
+  };
+  try {
+    const request = new NextRequest(`${origin}/api`, {
+      headers: { "x-request-id": "test-request-log-details" },
+    });
+    logRouteFailure(request, "test.log-details", new AiProviderError("INVALID_OUTPUT"), {
+      schemaIssues: ["risks.0.severity"],
+      errorCode: ["spoofed"],
+    });
+  } finally {
+    console.error = originalError;
+  }
+
+  assert.equal(lines.length, 1);
+  const logged = JSON.parse(lines[0] as string) as Record<string, unknown>;
+  assert.equal(logged.operation, "test.log-details");
+  assert.equal(logged.requestId, "test-request-log-details");
+  assert.equal(logged.errorName, "AiProviderError");
+  // Core fields win over colliding detail keys.
+  assert.equal(logged.errorCode, "INVALID_OUTPUT");
+  assert.deepEqual(logged.schemaIssues, ["risks.0.severity"]);
 });

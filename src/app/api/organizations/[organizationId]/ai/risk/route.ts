@@ -13,7 +13,7 @@ import { isRateLimited } from "../../../../../../server/auth-rate-limit.ts";
 import { withOrganizationContext } from "../../../../../../server/db.ts";
 import { buildAiPrompt, buildProjectContext } from "../../../../../../server/ai/context.ts";
 import { completeAiExecution, failAiExecution, startAiExecution } from "../../../../../../server/ai/execution.ts";
-import { AiProviderError, resolveAiProvider } from "../../../../../../server/ai/provider.ts";
+import { AiProviderError, parseAiJsonOutput, resolveAiProvider } from "../../../../../../server/ai/provider.ts";
 
 export const runtime = "nodejs";
 
@@ -67,16 +67,21 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       context.contextText,
     );
     const startedAt = Date.now();
+    // Schema-issue paths from a failed validation, if any. Field
+    // paths only (e.g. risks.0.severity) — never model output or
+    // values — so the next INVALID_OUTPUT names the mismatch.
+    let schemaIssues: string[] | undefined;
     try {
       const output = await provider.generate({ ...prompt, maxOutputTokens: 4000 });
       let risksJson: unknown;
       try {
-        risksJson = JSON.parse(output.text) as unknown;
+        risksJson = parseAiJsonOutput(output.text);
       } catch {
         throw new AiProviderError("INVALID_OUTPUT");
       }
       const risks = aiRiskOutputSchema.safeParse(risksJson);
       if (!risks.success) {
+        schemaIssues = risks.error.issues.map((issue) => issue.path.join(".") || "(root)");
         throw new AiProviderError("INVALID_OUTPUT");
       }
       await completeAiExecution(principal.userId, organizationId, executionId, {
@@ -92,7 +97,7 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       } catch (recordError) {
         logRouteFailure(request, "ai.risk.record", recordError);
       }
-      logRouteFailure(request, "ai.risk", error);
+      logRouteFailure(request, "ai.risk", error, schemaIssues ? { schemaIssues } : undefined);
       return jsonError(request, 503, "AI_FAILED", "The AI risk analysis could not be produced. Please try again later.");
     }
   } catch (error) {

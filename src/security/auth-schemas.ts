@@ -50,6 +50,10 @@ export const changePasswordSchema = z.strictObject({
   newPassword: password,
 });
 
+export const accountDeletionSchema = z.strictObject({
+  confirmation: email,
+});
+
 export const sessionRevokeSchema = z.strictObject({
   sessionId: z.string().uuid(),
 });

@@ -42,6 +42,8 @@ Never commit a real value, and never commit `.env.local`.
 | `NEXORA_CRON_TOKEN` | Yes, for scheduled jobs | Long random value, distinct from the metrics token, sent as `x-nexora-cron-token`. Blank or unset means every cron call fails closed with 503. |
 | `NEXORA_ALERT_EMAIL` | Recommended | Operator mailbox for metrics alerts. Blank means alerts are disabled — never sent to a guessed address. Recommended value: the operator mailbox you monitor (for this deployment, the Nexora mailbox that already sends mail). |
 | `NEXORA_ALERT_SERVER_ERROR_THRESHOLD` | No | Server-error count threshold for alerts; default 10. Database-down alerts are sent at most once an hour regardless. |
+| `NEXORA_HEALING_DISABLED` | No | Set to `1` to disable the healing cron job entirely (it records "disabled by operator" and purges nothing). Unset (or anything else) means the job runs. |
+| `NEXORA_AI_CIRCUIT_BREAKER_DISABLED` | No | Set to `1` to disable the AI provider circuit breaker (the HTTP provider is used unwrapped). Unset means the breaker trips after 5 consecutive provider failures with a 60-second cooldown. |
 | `NEXORA_DEFAULT_STORAGE_QUOTA_BYTES` | No | Opt-in default quota (bytes) for organizations with no explicit quota. Blank means no cap, as before. Recommended value, if a default is wanted at all: 1073741824 (1 GiB). An explicit per-organization quota always wins. |
 | `AI_PROVIDER`, `AI_PROVIDER_BASE_URL`, `AI_PROVIDER_API_KEY`, `AI_PROVIDER_MODEL` | No | Unset (or anything other than `http`/`mock`) means AI endpoints fail closed with 503 `AI_UNAVAILABLE`. `mock` is a deterministic test double and is refused in production. `http` uses a generic OpenAI-compatible chat-completions endpoint; the key is server-only and never logged. |
 
@@ -95,12 +97,12 @@ scheduled path for jobs the application itself can run; backup
 remains an operator-run script because a serverless route cannot
 `pg_dump` as a superuser/BYPASSRLS role.
 
-### 6a. Cron route (due-date, cleanup, email-outbox, alerts)
+### 6a. Cron route (due-date, cleanup, email-outbox, alerts, healing)
 
 `GET /api/cron/<job>` with header `x-nexora-cron-token:
 <NEXORA_CRON_TOKEN>`, where `<job>` is one of `due-date`,
-`cleanup`, `email-outbox`, `alerts` (migration 0049,
-`src/server/scheduled.ts`). The token is the only authentication:
+`cleanup`, `email-outbox`, `alerts`, `healing` (migrations 0049
+and 0051, `src/server/scheduled.ts`). The token is the only authentication:
 cron callers are not browsers, so the origin check does not apply.
 If `NEXORA_CRON_TOKEN` is unset, every call fails closed with 503.
 Each job claims one row per day in `nexora.scheduled_job_runs`;
@@ -133,10 +135,14 @@ of repeating work, and a failed run can be retried the same day
   external aggregation of `/api/metrics` remains the recommended
   monitor there, and the database-down rule works on every
   instance.
+- **healing (daily, off-peak):** bounded auto-healing (PRD 31):
+  purges expired sessions only. Disabled entirely by
+  `NEXORA_HEALING_DISABLED=1`, which records "disabled by
+  operator" instead of acting. See ARCHITECTURE.md §9d.
 
 Production schedule (shipped in `vercel.json`, UTC):
 `due-date` daily 02:00, `cleanup` daily 03:00, `email-outbox`
-daily 04:00, `alerts` daily 05:00. All four are daily-only on
+daily 04:00, `alerts` daily 05:00, `healing` daily 06:00. All five are daily-only on
 purpose: Vercel's Hobby plan rejects any cron expression that
 runs more than once per day at deploy time, so the tighter
 cadences the jobs were designed for (`email-outbox` every

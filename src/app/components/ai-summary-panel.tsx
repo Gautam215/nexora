@@ -26,6 +26,7 @@ export default function AiSummaryPanel({
   projectId: string;
 }) {
   const [summary, setSummary] = useState<AiSummary | null>(null);
+  const [scope, setScope] = useState("project");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
 
@@ -38,7 +39,7 @@ export default function AiSummaryPanel({
         {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ projectId }),
+          body: JSON.stringify({ projectId, scope }),
         },
       );
       const result = (await response.json().catch(() => null)) as ApiResult<AiSummary> | null;
@@ -66,8 +67,23 @@ export default function AiSummaryPanel({
         </div>
       </div>
       <p className="project-section-copy">
-        A summary generated from this project&apos;s tasks, milestones, activity, and comments you can access.
+        A summary generated from this project data you can access.
       </p>
+      <label className="project-section-copy" htmlFor="ai-summary-scope">
+        Summary scope
+      </label>
+      <select
+        id="ai-summary-scope"
+        value={scope}
+        onChange={(event) => setScope(event.target.value)}
+        disabled={pending}
+      >
+        <option value="project">Whole project</option>
+        <option value="tasks">Tasks</option>
+        <option value="comments">Comments</option>
+        <option value="activity">Recent activity</option>
+        <option value="milestones">Milestones</option>
+      </select>
       {summary ? (
         <p className="project-section-copy">{summary.summary}</p>
       ) : (

@@ -239,7 +239,13 @@ export default function AuthPage({ mode, nextPath }: AuthPageProps) {
             </form>
           ) : null}
 
-
+          {(mode === "register" || mode === "forgot-password" || mode === "resend-verification") && (
+            <p className="workspace-note">
+              Account emails (confirmation, password reset) are sent through an
+              external email provider, which receives your email address and
+              the link in the message. No other personal data is sent with them.
+            </p>
+          )}
           {error && <p className="form-message form-error" role="alert">{error}</p>}
           {message && <p className="form-message form-success" role="status" aria-live="polite">{message}</p>}
           <nav className="auth-links" aria-label="Account links">{linksFor(mode, verified, nextPath)}</nav>

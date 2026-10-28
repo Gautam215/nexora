@@ -16,7 +16,10 @@ if (!connectionString) throw new Error("DATABASE_URL is required");
 const pool = new Pool({
   connectionString,
   application_name: "nexora-benchmark",
-  max: 2,
+  // 12 so the concurrent phase (10 workers) measures database
+  // contention, not pool queueing; the sequential phase never
+  // holds more than one connection.
+  max: 12,
   connectionTimeoutMillis: 5000,
   statement_timeout: 15000,
   query_timeout: 17000,
@@ -41,6 +44,30 @@ async function measure(name, sql, params, iterations = 20) {
   console.log(JSON.stringify({ query: name, ...summarize(samples) }));
 }
 
+// Concurrent phase (2026-10-28, PRD 39): the same query shapes,
+// but with several workers issuing them at once, so the numbers
+// reflect contention, not just single-query cost. Each worker runs
+// its own sequential chain; latencies from all workers are pooled.
+async function measureConcurrent(name, sql, params, workers = 10, iterations = 20) {
+  await pool.query(sql, params);
+  const runWorker = async () => {
+    const samples = [];
+    for (let i = 0; i < iterations; i += 1) {
+      const start = performance.now();
+      await pool.query(sql, params);
+      samples.push(performance.now() - start);
+    }
+    return samples;
+  };
+  const all = (await Promise.all(Array.from({ length: workers }, runWorker))).flat();
+  const sorted = [...all].sort((a, b) => a - b);
+  console.log(JSON.stringify({
+    query: `${name}_concurrent_${workers}x${iterations}`,
+    ...summarize(all),
+    max_ms: Number(sorted[sorted.length - 1].toFixed(2)),
+  }));
+}
+
 try {
   const counts = await pool.query(
     `SELECT (SELECT count(*) FROM nexora.organizations) AS organizations,
@@ -59,6 +86,11 @@ try {
   await measure("search_files_by_name", "SELECT id, original_filename FROM nexora.task_files WHERE original_filename ILIKE $1 LIMIT 50", ["%release%"]);
   await measure("list_notifications", "SELECT id, title, created_at FROM nexora.notifications ORDER BY created_at DESC LIMIT 50", []);
   await measure("org_storage_usage", "SELECT COALESCE(sum(byte_size), 0) FROM nexora.task_files WHERE deleted_at IS NULL", []);
+  await measureConcurrent("list_projects", "SELECT id, name, status FROM nexora.projects ORDER BY created_at DESC LIMIT 50", []);
+  await measureConcurrent("list_tasks", "SELECT id, title, workflow_status_id FROM nexora.tasks ORDER BY created_at DESC LIMIT 50", []);
+  await measureConcurrent("search_files_by_name", "SELECT id, original_filename FROM nexora.task_files WHERE original_filename ILIKE $1 LIMIT 50", ["%release%"]);
+  await measureConcurrent("list_notifications", "SELECT id, title, created_at FROM nexora.notifications ORDER BY created_at DESC LIMIT 50", []);
+  await measureConcurrent("org_storage_usage", "SELECT COALESCE(sum(byte_size), 0) FROM nexora.task_files WHERE deleted_at IS NULL", []);
 } finally {
   await pool.end();
 }

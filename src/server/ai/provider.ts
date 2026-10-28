@@ -1,5 +1,7 @@
 import "server-only";
 
+import { isAiCircuitBreakerDisabled, withAiCircuitBreaker } from "./circuit-breaker.ts";
+
 // AI provider abstraction (PRD 17, 23). No business logic calls a
 // provider directly: routes call resolveAiProvider() and then
 // generate(), and every call is recorded by src/server/ai/execution.ts.
@@ -49,7 +51,12 @@ export interface AiProvider {
 }
 
 export class AiProviderError extends Error {
-  readonly code: "PROVIDER_UNAVAILABLE" | "PROVIDER_TIMEOUT" | "PROVIDER_REJECTED" | "INVALID_OUTPUT";
+  readonly code:
+    | "PROVIDER_UNAVAILABLE"
+    | "PROVIDER_TIMEOUT"
+    | "PROVIDER_REJECTED"
+    | "INVALID_OUTPUT"
+    | "PROVIDER_CIRCUIT_OPEN";
 
   constructor(code: AiProviderError["code"]) {
     super(`AI provider failed: ${code}`);
@@ -60,6 +67,19 @@ export class AiProviderError extends Error {
 
 export function estimateTokens(text: string): number {
   return Math.max(1, Math.ceil(text.length / 4));
+}
+
+// Parse a model JSON response. Models frequently wrap JSON in a
+// markdown code fence (```json ... ```) despite a "JSON only"
+// instruction, and the routes previously fed the raw text to
+// JSON.parse, so a fenced response failed as INVALID_OUTPUT even
+// though the JSON inside was valid. Strip one surrounding fence
+// (with or without the json tag); anything else parses as before,
+// so genuinely invalid output still fails the same way.
+export function parseAiJsonOutput(text: string): unknown {
+  const trimmed = text.trim();
+  const fenced = /^```(?:json)?\s*\n?([\s\S]*?)\n?```\s*$/.exec(trimmed);
+  return JSON.parse(fenced ? fenced[1].trim() : trimmed);
 }
 
 const PROVIDER_TIMEOUT_MS = 30_000;
@@ -227,5 +247,8 @@ export function resolveAiProvider(): AiProvider | null {
   if (baseUrl.protocol !== "https:" && !(process.env.NODE_ENV !== "production" && isLoopback(baseUrl))) {
     return null;
   }
-  return new HttpAiProvider(model, baseUrl.href.replace(/\/$/, ""), apiKey);
+  const httpProvider = new HttpAiProvider(model, baseUrl.href.replace(/\/$/, ""), apiKey);
+  // Circuit breaker (PRD 31): wraps only the real HTTP provider, never
+  // the mock. Disabled by NEXORA_AI_CIRCUIT_BREAKER_DISABLED=1.
+  return isAiCircuitBreakerDisabled() ? httpProvider : withAiCircuitBreaker(httpProvider);
 }

@@ -69,6 +69,11 @@ export function logRouteFailure(
   request: NextRequest,
   operation: string,
   error: unknown,
+  // Optional structured details, restricted to string arrays so no
+  // free-form content (notably no model output or user data) can enter
+  // the log line. Spread before the core fields, so a colliding key
+  // can never override them.
+  details?: Record<string, string[]>,
 ): void {
   const errorName = error instanceof Error ? error.name : "UnknownError";
   // Bounded error code for the log line: database codes (e.g. 23505)
@@ -88,6 +93,7 @@ export function logRouteFailure(
       severity: "error",
       service: "nexora-api",
       event: "api.request_failed",
+      ...(details ?? {}),
       operation,
       requestId: requestId(request),
       errorName,

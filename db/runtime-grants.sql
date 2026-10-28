@@ -23,6 +23,8 @@ GRANT EXECUTE ON FUNCTION nexora.list_expired_projects() TO nexora_app;
 GRANT EXECUTE ON FUNCTION nexora.purge_expired_milestones() TO nexora_app;
 GRANT EXECUTE ON FUNCTION nexora.list_expired_milestones() TO nexora_app;
 GRANT EXECUTE ON FUNCTION nexora.purge_expired_organizations() TO nexora_app;
+GRANT EXECUTE ON FUNCTION nexora.purge_expired_sessions() TO nexora_app;
+GRANT EXECUTE ON FUNCTION nexora.organization_usage_summary(uuid, uuid) TO nexora_app;
 GRANT EXECUTE ON FUNCTION nexora.list_expired_organizations() TO nexora_app;
 GRANT EXECUTE ON FUNCTION nexora.list_expired_task_files() TO nexora_app;
 GRANT EXECUTE ON FUNCTION nexora.list_unreferenced_task_file_keys(uuid[]) TO nexora_app;
@@ -178,7 +180,7 @@ GRANT SELECT (
 ON TABLE nexora.task_dependencies TO nexora_app;
 
 GRANT SELECT (
-    id, organization_id, project_id, task_id, author_user_id, body, created_at
+    id, organization_id, project_id, task_id, author_user_id, body, created_at, deleted_at
   ),
   INSERT (id, organization_id, project_id, task_id, author_user_id, body)
 ON TABLE nexora.task_comments TO nexora_app;
@@ -216,7 +218,7 @@ GRANT INSERT (
   )
 ON TABLE nexora.notifications TO nexora_app;
 
-GRANT INSERT, SELECT, UPDATE ON TABLE nexora.scheduled_job_runs TO nexora_app;
+GRANT INSERT, SELECT, UPDATE, DELETE ON TABLE nexora.scheduled_job_runs TO nexora_app;
 
 GRANT INSERT, SELECT, DELETE ON TABLE nexora.organization_creation_idempotency TO nexora_app;
 
@@ -268,3 +270,15 @@ ON TABLE nexora.audit_events TO nexora_app;
 
 REVOKE UPDATE, DELETE, TRUNCATE ON nexora.audit_events FROM nexora_app;
 REVOKE ALL ON nexora.schema_migrations FROM nexora_app;
+
+-- Member removal (migrations 0054-0055): DELETE is table-wide in
+-- PostgreSQL, it cannot be column-scoped. Removal deletes only
+-- notification preferences and pending invitations; the membership rows
+-- themselves are disabled, not deleted (0055 dropped the unused
+-- membership DELETE policies and grants). The two tables below gain
+-- DELETE for the app role, bounded by the 0054 RLS DELETE policies
+-- (manager/self split). Audit events deliberately keep no DELETE grant.
+GRANT DELETE
+ON TABLE nexora.organization_invitations,
+  nexora.notification_preferences
+TO nexora_app;

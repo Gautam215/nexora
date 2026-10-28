@@ -49,6 +49,97 @@ the model. No application code is included here.
   retry; it now replays on the same key and body and returns
   409 `IDEMPOTENCY_KEY_REUSED` on key reuse with a different
   body (see API.md §1.6).
+- **Migration 0051 (2026-10-28 healing round):**
+  the `scheduled_job_runs` job CHECK gains `'healing'`, and
+  `purge_expired_sessions()` (SECURITY DEFINER, grant in
+  `runtime-grants.sql`) deletes sessions whose `expires_at`
+  has passed. Expired sessions cannot authenticate, so the
+  purge changes no live session.
+- **Migration 0052 (2026-10-28 healing round):**
+  `organization_usage_summary(org, user)` (SECURITY DEFINER,
+  grant in `runtime-grants.sql`): refuses non-owners/admins
+  with a forbidden marker, then returns storage bytes, active
+  file count, and quota plus per-workflow AI token usage over
+  succeeded executions, for all time and for the last 30 days.
+  It exists because `ai_executions` rows are RLS-restricted to
+  the caller's own rows, so no plain member query can aggregate
+  org-wide.
+- **Migration 0053 (2026-10-28 healing round, correction):**
+  `CREATE OR REPLACE` of `organization_usage_summary` with
+  the identical signature and checks: 0052 schema-qualified
+  COALESCE as `pg_catalog.coalesce`, but COALESCE is a
+  conditional expression, not a function, so every call failed
+  with 42883 and the usage endpoint answered 500. Only the
+  COALESCE calls are unqualified here; 0052 itself is not
+  edited.
+- **Migration 0054 (2026-10-28 member removal):**
+  RLS DELETE policies (manager/self split) plus the matching
+  DELETE grants in `runtime-grants.sql` for notification
+  preferences and organization invitations, the two tables
+  removal actually deletes. Membership-row DELETE policies
+  were included here first and removed again by 0055.
+- **Migration 0055 (2026-10-28 member removal, correction):**
+  drops the unused organization/project membership DELETE
+  policies from 0054 and revokes their DELETE grants: removal
+  disables the membership instead of deleting it, because the
+  schema anchors history to memberships with RESTRICT keys.
+  0054 itself is not edited.
+- **Migration 0056 (2026-10-28 member removal):**
+  `apply_organization_member_removal(org, user)` (SECURITY
+  DEFINER, grant in `runtime-grants.sql`): unassigns the
+  member's tasks in the workspace and disables the membership.
+  It exists because there is no update-self RLS policy, so a
+  direct UPDATE would silently affect zero rows for a
+  voluntary leave, and a viewer could not unassign their own
+  tasks. The caller must be an active member and either a
+  manager or the member themselves; the route enforces owner
+  protection and the last-owner block before calling it.
+- **Migration 0057 (2026-10-28 account deletion):**
+  `users.deleted_at` (the scrub marker; a scrubbed account has
+  status `suspended`, so the existing login check denies it and
+  no route can unsuspend it) plus the `account-export-user`
+  and `account-deletion-user` rate-limit scopes (CHECK and
+  `consume_auth_rate_limit` allowlist, following the
+  established pattern).
+- **Migration 0058 (2026-10-28 account lifecycle):**
+  `delete_user_account(user)` and `export_user_data(user)`
+  (SECURITY DEFINER, EXECUTE granted to `nexora_app` only).
+  Both guard to the caller and raise 42501 otherwise. Deletion
+  scrubs instead of hard-deleting (the users row anchors
+  history with RESTRICT keys): one `account.deleted` audit
+  row per active workspace, sessions and auth tokens deleted,
+  notification preferences deleted, pending invitations for
+  the user's email deleted, tasks unassigned everywhere,
+  project memberships deleted except mention anchors,
+  organization memberships disabled, and the user row
+  anonymized. A sole-owner active workspace blocks deletion
+  and its slug is returned. (Note: 0058's header comment
+  mentions transferring ownership, which is stale — no
+  transfer route exists and role updates cannot set owner,
+  so a sole owner must delete the workspace first; the
+  account route message already says exactly that. 0058
+  itself is not edited for a comment.) Export returns the caller's own
+  data across workspaces as JSON; files are metadata only,
+  AI executions are metadata only, notifications are counts
+  only.
+- **Migration 0059 (2026-10-28 comment soft-delete):**
+  `task_comments.deleted_at` plus `delete_task_comment(org,
+  project, task, comment)` (SECURITY DEFINER, EXECUTE granted
+  to `nexora_app` only): sets `deleted_at` and nothing else,
+  only for the author or a project manager, returning false
+  for an already-deleted or nonexistent comment. There is
+  deliberately no UPDATE policy on `task_comments`: a broad
+  policy would let a future route edit comment bodies, which
+  the append-only design forbids. The app role's column-level
+  SELECT grant on `task_comments` was extended with
+  `deleted_at` in `runtime-grants.sql`, or the list and search
+  filters fail with 42501.
+- **Migration 0060 (2026-10-28 account deletion,
+  correction):** redefines `delete_user_account` identically
+  to 0058 except the audit insert now supplies a generated
+  `id`: `audit_events.id` has no default, so 0058's insert
+  failed every deletion with 23502. 0058 itself is not
+  edited.
 - **Not used:** Redis, a queue store, or a separate analytics store.
   Rate limits, idempotency, and notifications are PostgreSQL tables.
   Task-file bytes are not in the database; only their metadata is (see
@@ -62,9 +153,9 @@ its load-bearing columns; the migrations give the full definition.
 
 | Table | Purpose and key columns |
 | --- | --- |
-| `users` | Account identity. `id`, unique `email`, `display_name`, `password_hash` (scrypt, nullable since migration 0032 for OAuth-only users; OAuth removed in migration 0047, nullability retained for migration safety — see ARCHITECTURE.md 7.1), `email_verified_at`, `created_at`, `updated_at`. |
+| `users` | Account identity. `id`, unique `email`, `display_name`, `password_hash` (scrypt, nullable since migration 0032 for OAuth-only users; OAuth removed in migration 0047, nullability retained for migration safety — see ARCHITECTURE.md 7.1), `email_verified_at`, `created_at`, `updated_at`, `deleted_at` (migration 0057; set when the account is scrubbed by deletion). |
 | `oauth_identities` | REMOVED in migration 0047 (was: Google identities, migration 0032). The table and `lookup_oauth_identity` no longer exist; migration 0032 is kept as history only. |
-| `scheduled_job_runs` | Cron job audit: `job` (due-date/cleanup/email-outbox/alerts), `run_date`, `status` (ok/failed), `detail`, one row per job per day. No RLS (operational rows only, cron route is token-gated). |
+| `scheduled_job_runs` | Cron job audit: `job` (due-date/cleanup/email-outbox/alerts), `run_date`, `status` (ok/failed), `detail`, one row per job per day. No RLS (operational rows only, cron route is token-gated). The app role holds INSERT, SELECT, UPDATE, and DELETE: the same-day retry path deletes a failed claim row before re-inserting it, and without the DELETE grant every same-day retry failed with 42501 (found by the operator-metrics test colliding with the cron claim in the full suite, 2026-10-28). |
 | `alert_state` | Alert deduplication: `rule` (server-errors/database-down), `last_value`, `last_sent_at`. No RLS (operational rows only). |
 | `organization_creation_idempotency` | Organization-creation replay: per-actor key hash + request hash, response status/body, 7-day expiry. RLS mirrors the project pattern (actor only). |
 | `project_creation_idempotency` | Project-creation replay (migration 0050): same shape as the organization table, operation `project.create`, 7-day expiry, but scoped per-actor per-organization (RLS actor + current organization). |
@@ -82,7 +173,7 @@ its load-bearing columns; the migrations give the full definition.
 | `milestone_dependencies` | Milestone → milestone dependency edges, checked for cycles under a per-project graph lock. |
 | `tasks` | Tasks within a project. `id`, `project_id`, `milestone_id` (nullable), `parent_task_id` (nullable, subtasks), `title`, `description`, `status_id`, `priority`, `assignee_id` (nullable), `creator_id`, `labels` (array), `due_date`, `estimated_effort`, `version`, `archived_at` (nullable), timestamps. |
 | `task_dependencies` | Task → task dependency edges, cycle-checked under the same per-project graph lock. |
-| `task_comments` | Append-only comments on tasks. `id`, `task_id`, `author_id`, `body`, `created_at`. There is no edit or delete path for comments. |
+| `task_comments` | Append-only comments on tasks. `id`, `task_id`, `author_id`, `body`, `created_at`, `deleted_at` (migration 0059; soft-delete hides the comment from lists and search, the row stays). No edit path. |
 | `task_comment_mentions` | Mentions extracted from comments, linking a comment to a mentioned project member, driving mention notifications. |
 | `task_files` | Private file metadata. `id`, `task_id`, `uploader_id`, `safe_filename`, `mime_type`, `byte_size`, `storage_key` (opaque, server-only), `sha256`, `version`, `deleted_at` (nullable, soft delete). Bytes live in the private filesystem, never in this table. `scan_status` (migration 0044, grants corrected in 0045): `pending` (not scanned — never a claim of clean), `clean` (a configured scanner reported clean), `quarantined` (scanner reported infected, or was unavailable at scan time; bytes and row are kept, downloads blocked with 409 FILE_QUARANTINED). |
 | `notifications` | In-app notifications. `id`, `recipient_id`, `organization_id`, `project_id` (nullable), `type`, `payload` (display data only), `read_at` (nullable), `created_at`. Deduplicated at insert. |

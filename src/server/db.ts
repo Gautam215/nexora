@@ -136,6 +136,61 @@ export function getDatabasePoolStats(): {
   };
 }
 
+// Operator aggregates for the token-gated /api/metrics endpoint (PRD
+// 33). The AI and outbox aggregates run SECURITY DEFINER (migration
+// 0061) because the app role cannot read those tables directly;
+// scheduled_job_runs has no RLS and the app role holds SELECT on it.
+// Throws when the database is unreachable or migration 0061 has not
+// been applied yet; the metrics route degrades to operator: null in
+// that case instead of failing the whole endpoint.
+export async function queryOperatorAggregates(): Promise<{
+  ai: unknown;
+  outbox: unknown;
+  jobs: {
+    failedLast7d: number;
+    totalLast7d: number;
+    lastRuns: Array<{ job: string; runDate: string; status: string }>;
+  };
+}> {
+  const ai = await getPool().query<{ ai_operator_aggregate: unknown }>(
+    "SELECT nexora.ai_operator_aggregate() AS ai_operator_aggregate",
+  );
+  const outbox = await getPool().query<{ outbox_queue_depth: unknown }>(
+    "SELECT nexora.outbox_queue_depth() AS outbox_queue_depth",
+  );
+  const jobs = await getPool().query<{
+    failed_last_7d: string;
+    total_last_7d: string;
+  }>(
+    `SELECT pg_catalog.count(*) FILTER (WHERE status = 'failed') AS failed_last_7d,
+            pg_catalog.count(*) AS total_last_7d
+     FROM nexora.scheduled_job_runs
+     WHERE created_at >= pg_catalog.now() - interval '7 days'`,
+  );
+  const lastRuns = await getPool().query<{
+    job: string;
+    run_date: string;
+    status: string;
+  }>(
+    `SELECT DISTINCT ON (job) job, run_date::text AS run_date, status
+     FROM nexora.scheduled_job_runs
+     ORDER BY job, created_at DESC`,
+  );
+  return {
+    ai: ai.rows[0]?.ai_operator_aggregate ?? null,
+    outbox: outbox.rows[0]?.outbox_queue_depth ?? null,
+    jobs: {
+      failedLast7d: Number(jobs.rows[0]?.failed_last_7d ?? 0),
+      totalLast7d: Number(jobs.rows[0]?.total_last_7d ?? 0),
+      lastRuns: lastRuns.rows.map((run) => ({
+        job: run.job,
+        runDate: run.run_date,
+        status: run.status,
+      })),
+    },
+  };
+}
+
 export async function closeDatabasePool(): Promise<void> {
   const pool = globalForDatabase.nexoraPool;
   if (!pool) return;

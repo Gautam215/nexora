@@ -31,7 +31,7 @@ import {
 // reminders or purging twice. A failed run does NOT block a retry:
 // the claim is replaced, so an operator can rerun a failed day.
 
-export const SCHEDULED_JOBS = ["due-date", "cleanup", "email-outbox", "alerts"] as const;
+export const SCHEDULED_JOBS = ["due-date", "cleanup", "email-outbox", "alerts", "healing"] as const;
 export type ScheduledJob = (typeof SCHEDULED_JOBS)[number];
 
 export class CronConfigurationError extends Error {
@@ -257,6 +257,50 @@ async function runCleanupJob(): Promise<string> {
   return `purged organization rows: ${organizations.rowCount ?? 0}, project rows: ${projects.rowCount ?? 0}, milestones: ${milestones.rowCount ?? 0}, task files: ${files.rowCount ?? 0}, file objects removed: ${objectsRemoved}, object removals failed: ${objectsFailed}`;
 }
 
+// Healing job (PRD 31: bounded operational auto-healing).
+//
+// What this job does — one safe action, nothing else:
+//   - Purges expired sessions (nexora.purge_expired_sessions()).
+//     Expired sessions cannot authenticate, so deleting them
+//     changes no live session; it only stops the table growing.
+//
+// What it deliberately does NOT do (the PRD 31 forbidden list,
+// plus what this architecture cannot do safely):
+//   - No source-code, schema, permission, policy, or secret change.
+//   - No scheduled-claim recovery is needed here: a crashed job
+//     leaves its claim row 'failed'/'in progress', and the next
+//     call replaces that claim and reruns (see claimJobRun).
+//   - No presence cleanup is needed here: presence is per-process
+//     memory, cleared on stream close, and any process (and its
+//     roster) dies with Vercel's 300s stream limit at the latest.
+//   - No storage-object recovery: objects whose database rows were
+//     already purged are owned by scripts/cleanup-task-files.mjs,
+//     which reports them; the job cannot invent their keys.
+//
+// The job's own properties (PRD 31: observable, bounded, rate
+// limited, alerting-aware, manually overrideable):
+//   - Observable: one scheduled_job_runs row per day, status + detail.
+//   - Bounded: a single DELETE of already-expired rows; nothing else.
+//   - Rate limited: the route is token-gated, and the job runs at
+//     most once per day (a second call replays).
+//   - Alerting-aware: a thrown error finishes the run as 'failed'
+//     AND rethrows, so the route answers 500, metrics count a
+//     server error, and the alerts job can fire on its threshold.
+//   - Manually overrideable: NEXORA_HEALING_DISABLED=1 makes the
+//     job record "disabled by operator" and act on nothing; any
+//     token holder can also trigger the job on demand via
+//     GET /api/cron/healing, outside the Vercel schedule.
+async function runHealingJob(): Promise<string> {
+  if (process.env.NEXORA_HEALING_DISABLED === "1") {
+    return "healing disabled by operator (NEXORA_HEALING_DISABLED=1)";
+  }
+  const pool = getScheduledPool();
+  const purged = await pool.query<{ purge_expired_sessions: number }>(
+    `SELECT nexora.purge_expired_sessions() AS purge_expired_sessions`,
+  );
+  return `purged expired sessions: ${purged.rows[0]?.purge_expired_sessions ?? 0}`;
+}
+
 async function runAlertsJob(): Promise<string> {
   const recipient = process.env.NEXORA_ALERT_EMAIL?.trim() ?? "";
   if (!recipient) return "alerts disabled: NEXORA_ALERT_EMAIL is not set";
@@ -320,7 +364,8 @@ export async function runScheduledJob(job: ScheduledJob): Promise<{ replay: bool
     else if (job === "email-outbox") {
       const result = await processNotificationEmailBatch(20);
       detail = `claimed ${result.claimed}, sent ${result.sent}, failed ${result.failed}, pending retry ${result.pendingRetry}`;
-    } else detail = await runAlertsJob();
+    } else if (job === "healing") detail = await runHealingJob();
+    else detail = await runAlertsJob();
     await finishJobRun(claim.id, "ok", detail);
     return { replay: false, detail };
   } catch (error) {

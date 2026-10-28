@@ -1,7 +1,11 @@
 import { timingSafeEqual } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { jsonError, jsonOk } from "../../../server/api.ts";
-import { checkDatabaseConnection, getDatabasePoolStats } from "../../../server/db.ts";
+import {
+  checkDatabaseConnection,
+  getDatabasePoolStats,
+  queryOperatorAggregates,
+} from "../../../server/db.ts";
 import { snapshotMetrics } from "../../../server/metrics.ts";
 
 export const runtime = "nodejs";
@@ -40,8 +44,20 @@ export async function GET(request: NextRequest) {
   const probeStarted = Date.now();
   const databaseUp = await checkDatabaseConnection();
   const databaseLatencyMs = Date.now() - probeStarted;
+  // DB-backed operator aggregates (PRD 33: AI latency/tokens, queue
+  // depth, job failures). Null when migration 0061 has not been
+  // applied yet or the database is unreachable: the in-memory
+  // counters above are still served, and the null itself tells the
+  // operator the aggregates are unavailable.
+  let operator: Awaited<ReturnType<typeof queryOperatorAggregates>> | null = null;
+  try {
+    operator = await queryOperatorAggregates();
+  } catch {
+    operator = null;
+  }
   return jsonOk(request, {
     ...snapshotMetrics(),
+    operator,
     database: {
       up: databaseUp,
       probeLatencyMs: databaseLatencyMs,
