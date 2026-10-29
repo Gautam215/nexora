@@ -86,10 +86,11 @@ async function registerVerifyAndLogin(email: string, password: string) {
 async function enrollTotp(cookie: string) {
   const setup = await totpSetup(apiRequest("/api/account/totp/setup", "POST", {}, cookie));
   assert.equal(setup.status, 200, await setup.clone().text());
-  const setupBody = (await setup.json()) as { data: { setup: { secret: string; otpauthUrl: string } } };
+  const setupBody = (await setup.json()) as { data: { setup: { secret: string; otpauthUrl: string; qrSvg?: string } } };
   const secret = setupBody.data.setup.secret;
   assert.ok(secret);
   assert.ok(setupBody.data.setup.otpauthUrl.includes(secret));
+  assert.ok(setupBody.data.setup.qrSvg?.startsWith("<svg"), "setup returns a QR SVG");
   const statusBefore = await totpStatus(apiRequest("/api/account/totp/status", "GET", undefined, cookie));
   const statusBeforeBody = (await statusBefore.json()) as { data: { enrolled: boolean } };
   assert.equal(statusBeforeBody.data.enrolled, false);

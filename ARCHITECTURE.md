@@ -121,10 +121,17 @@ own operating manual).
   AES-256-GCM ciphertext under `NEXORA_TOTP_ENCRYPTION_KEY`
   in `nexora.user_totp_credentials` (RLS self policies),
   and, once verified, gate account and workspace deletion
-  alongside the current password; enrollment shows the
-  manual key plus the otpauth:// URL (no QR library, no new
-  dependency), and unenrolled users proceed on password
-  alone by approved design. The file-retention/orphan cleanup
+  alongside the current password; enrollment first asks which app
+  the user will use (Google or Microsoft Authenticator), then
+  shows a server-rendered QR SVG of the otpauth:// URL with the
+  manual key as fallback — the QR is generated in-process by the
+  `qrcode` package (added 2026-10-29 for this feature: QR encoding
+  is a full algorithm, not a few lines of stdlib, and no external
+  QR service is ever used, so the secret never leaves the server
+  except to the user's own browser as before), and the app choice
+  only changes the on-screen instructions, since both apps read
+  the same standard otpauth URL; unenrolled users proceed on
+  password alone by approved design. The file-retention/orphan cleanup
   script (`scripts/cleanup-task-files.mjs`) remains the
   operator-run fallback for object orphans. Backup remains an
   operator script: a serverless route cannot `pg_dump` as a

@@ -260,6 +260,16 @@ h1 {
   line-height: 1.6;
 }
 
+.totp-qr {
+  display: block;
+  width: 200px;
+  height: auto;
+  margin: 0 0 19px;
+  padding: 12px;
+  border-radius: 12px;
+  background: #ffffff;
+}
+
 .session-list {
   display: grid;
   gap: 13px;

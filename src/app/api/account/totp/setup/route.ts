@@ -1,3 +1,4 @@
+import QRCode from "qrcode";
 import type { NextRequest } from "next/server";
 import { totpVerifySchema } from "../../../../../security/auth-schemas.ts";
 import { getAuthPrincipal, getAuthenticatedUser } from "../../../../../server/auth.ts";
@@ -86,8 +87,19 @@ export async function POST(request: NextRequest) {
     await withUserContext(principal.userId, async (transaction) => {
       await createTotpSetup(transaction, principal.userId, encrypted);
     });
+    const otpauthUrl = totpSetupUrl(secret, user.email);
+    let qrSvg: string | undefined;
+    try {
+      qrSvg = await QRCode.toString(otpauthUrl, { type: "svg" });
+    } catch {
+      // QR rendering is a convenience, not the enrollment itself:
+      // the manual key below enrolls the same secret, so a renderer
+      // failure must not block enrollment. The UI falls back to the
+      // manual key when qrSvg is absent.
+      qrSvg = undefined;
+    }
     return jsonOk(request, {
-      setup: { secret, otpauthUrl: totpSetupUrl(secret, user.email) },
+      setup: { secret, otpauthUrl, ...(qrSvg ? { qrSvg } : {}) },
     });
   } catch (error) {
     if (error instanceof TotpConfigurationError) {

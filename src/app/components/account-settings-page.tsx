@@ -79,7 +79,9 @@ export default function AccountSettingsPage() {
   const [deleteError, setDeleteError] = useState("");
 
   const [totpEnrolled, setTotpEnrolled] = useState(false);
-  const [totpSetup, setTotpSetup] = useState<{ secret: string; otpauthUrl: string } | null>(null);
+  const [totpSetup, setTotpSetup] = useState<{ secret: string; otpauthUrl: string; qrSvg?: string } | null>(null);
+  const [totpAppChoice, setTotpAppChoice] = useState<"google" | "microsoft" | null>(null);
+  const [totpShowManual, setTotpShowManual] = useState(false);
   const [totpCode, setTotpCode] = useState("");
   const [totpDisablePassword, setTotpDisablePassword] = useState("");
   const [totpPending, setTotpPending] = useState(false);
@@ -103,15 +105,17 @@ export default function AccountSettingsPage() {
     void loadTotpStatus();
   }, [loadTotpStatus]);
 
-  async function startTotpSetup() {
+  async function startTotpSetup(app: "google" | "microsoft") {
     if (totpPending) return;
+    setTotpAppChoice(app);
+    setTotpShowManual(false);
     setTotpPending(true);
     setTotpError("");
     setTotpSuccess("");
     try {
       const response = await fetch("/api/account/totp/setup", { method: "POST" });
       const result = (await response.json().catch(() => null)) as ApiResult<{
-        setup: { secret: string; otpauthUrl: string };
+        setup: { secret: string; otpauthUrl: string; qrSvg?: string };
       }> | null;
       // Only a missing session signs the user out: a factor 401
       // (wrong current code on re-enrollment) is a form error,
@@ -157,6 +161,8 @@ export default function AccountSettingsPage() {
       }
       setTotpEnrolled(true);
       setTotpSetup(null);
+      setTotpAppChoice(null);
+      setTotpShowManual(false);
       setTotpCode("");
       setTotpSuccess("Authenticator enabled. Deleting your account or a workspace now also requires a code.");
     } catch {
@@ -743,18 +749,46 @@ export default function AccountSettingsPage() {
                   </form>
                 ) : totpSetup ? (
                   <form className="confirm-panel" onSubmit={verifyTotpSetup}>
-                    <p>
-                      Add this key to your authenticator app (manual entry), then enter the
-                      6-digit code it shows. The key is shown once.
-                    </p>
-                    <p>
-                      <span>Setup key: </span>
-                      <code>{totpSetup.secret}</code>
-                    </p>
-                    <p>
-                      <span>App URL: </span>
-                      <code>{totpSetup.otpauthUrl}</code>
-                    </p>
+                    {totpSetup.qrSvg && !totpShowManual ? (
+                      <>
+                        <p>
+                          Scan this QR code with {totpAppChoice === "microsoft" ? "Microsoft" : "Google"} Authenticator,
+                          then enter the 6-digit code it shows. The code changes every 30 seconds.
+                        </p>
+                        <img
+                          className="totp-qr"
+                          src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(totpSetup.qrSvg)}`}
+                          alt="Authenticator setup QR code"
+                        />
+                        <div className="confirm-actions">
+                          <button className="quiet-button" type="button" onClick={() => setTotpShowManual(true)} disabled={totpPending}>
+                            Use a setup code instead
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <p>
+                          Add this key to your authenticator app (manual entry), then enter the
+                          6-digit code it shows. The key is shown once.
+                        </p>
+                        <p>
+                          <span>Setup key: </span>
+                          <code>{totpSetup.secret}</code>
+                        </p>
+                        <p>
+                          <span>App URL: </span>
+                          <code>{totpSetup.otpauthUrl}</code>
+                        </p>
+                        {totpSetup.qrSvg && (
+                          <div className="confirm-actions">
+                            <button className="quiet-button" type="button" onClick={() => setTotpShowManual(false)} disabled={totpPending}>
+                              Back to QR code
+                            </button>
+                          </div>
+                        )}
+                      </>
+                    )}
                     <label className="form-field">
                       <span>Authenticator code</span>
                       <input
@@ -771,15 +805,23 @@ export default function AccountSettingsPage() {
                       <button className="primary-button" type="submit" disabled={totpPending}>
                         {totpPending ? "Verifying..." : "Verify and enable"}
                       </button>
-                      <button className="quiet-button" type="button" onClick={() => setTotpSetup(null)} disabled={totpPending}>
+                      <button className="quiet-button" type="button" onClick={() => { setTotpSetup(null); setTotpAppChoice(null); setTotpShowManual(false); }} disabled={totpPending}>
                         Cancel setup
                       </button>
                     </div>
                   </form>
                 ) : (
-                  <button className="quiet-button" type="button" onClick={() => void startTotpSetup()} disabled={totpPending}>
-                    {totpPending ? "Starting setup..." : "Set up authenticator"}
-                  </button>
+                  <div>
+                    <p>Which authenticator app will you use?</p>
+                    <div className="confirm-actions">
+                      <button className="quiet-button" type="button" onClick={() => void startTotpSetup("google")} disabled={totpPending}>
+                        {totpPending ? "Starting setup..." : "Google Authenticator"}
+                      </button>
+                      <button className="quiet-button" type="button" onClick={() => void startTotpSetup("microsoft")} disabled={totpPending}>
+                        {totpPending ? "Starting setup..." : "Microsoft Authenticator"}
+                      </button>
+                    </div>
+                  </div>
                 )}
               </section>
               <section className="account-section" aria-labelledby="data-title">
