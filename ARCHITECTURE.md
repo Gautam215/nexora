@@ -100,7 +100,7 @@ own operating manual).
   structured operator.auth_failed event (endpoint only, never
   the token); the metrics endpoint has the same protection
   under scope operator-metrics. Operator hardening
-  (2026-10-29 controls round, local only until pushed):
+  (2026-10-29 controls round, live since push 16):
   the metrics route now authenticates before answering but
   after its rate limit, locks an IP out for 15 minutes after
   five failed tokens (peek-only scope
@@ -115,7 +115,7 @@ own operating manual).
   (`NEXORA_OPERATOR_DATABASE_URL`); the dedicated role is
   created and granted by the database owner, not by any
   migration. Authenticator second factor (2026-10-29,
-  migration 0067, local only until pushed): TOTP secrets
+  migration 0067, live since push 16): TOTP secrets
   (RFC 6238, SHA-1, 30 s steps, 6 digits, ±1 step window)
   are generated with the platform RNG, stored only as
   AES-256-GCM ciphertext under `NEXORA_TOTP_ENCRYPTION_KEY`

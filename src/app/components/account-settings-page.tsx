@@ -113,7 +113,10 @@ export default function AccountSettingsPage() {
       const result = (await response.json().catch(() => null)) as ApiResult<{
         setup: { secret: string; otpauthUrl: string };
       }> | null;
-      if (response.status === 401) {
+      // Only a missing session signs the user out: a factor 401
+      // (wrong current code on re-enrollment) is a form error,
+      // exactly like the verify and disable handlers below.
+      if (response.status === 401 && result?.error?.code === "AUTHENTICATION_REQUIRED") {
         window.location.assign("/login");
         return;
       }

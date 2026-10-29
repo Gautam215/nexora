@@ -31,7 +31,7 @@ interface RouteContext {
 // started before the call and completed after it.
 export async function POST(request: NextRequest, { params }: RouteContext) {
   if (!hasSameOrigin(request)) {
-    return jsonError(request, 403, "FORBIDDEN_ORIGIN", "Request origin is not allowed.");
+    return jsonError(request, 403, "ORIGIN_REJECTED", "This request was rejected.");
   }
   const parsed = await parseJson(request, aiMeetingSummarizeSchema);
   if (!parsed.ok) {

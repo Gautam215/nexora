@@ -218,3 +218,62 @@ test(
     assert.equal(deletedAfterDisable.status, 200, await deletedAfterDisable.clone().text());
   },
 );
+
+test(
+  "totp: re-enrollment setup requires the current code when already enrolled",
+  { skip: !connectionString },
+  async () => {
+    if (!smtp) {
+      smtp = await startSmtpCaptureServer();
+      process.env.SMTP_HOST = "127.0.0.1";
+      process.env.SMTP_PORT = String(smtp.port);
+      process.env.SMTP_USER = "";
+      process.env.SMTP_PASSWORD = "";
+      process.env.SMTP_FROM = "noreply@nexora.example.test";
+      process.env.SMTP_REQUIRE_TLS = "false";
+    }
+
+    const user = await registerVerifyAndLogin("totp-f@nexora.example.test", "totp user password f");
+    const secret = await enrollTotp(user.cookie);
+
+    // A bodyless re-setup must not silently replace the verified row
+    // with a pending one: without a body there is no current code.
+    const noBody = await totpSetup(apiRequest("/api/account/totp/setup", "POST", undefined, user.cookie));
+    assert.equal(noBody.status, 415, await noBody.clone().text());
+    const emptyBody = await totpSetup(apiRequest("/api/account/totp/setup", "POST", {}, user.cookie));
+    assert.equal(emptyBody.status, 400, await emptyBody.clone().text());
+    const wrong = await totpSetup(
+      apiRequest("/api/account/totp/setup", "POST", { code: wrongCode(totpCode(secret, Date.now())) }, user.cookie),
+    );
+    assert.equal(wrong.status, 401, await wrong.clone().text());
+    const wrongBody = (await wrong.json()) as { error: { code: string } };
+    assert.equal(wrongBody.error.code, "INVALID_CREDENTIALS");
+
+    // The blocked attempts changed nothing: the factor still gates
+    // deletion, so the bypass (setup-reset, then password-only
+    // delete) is closed.
+    const stillEnrolled = await totpStatus(apiRequest("/api/account/totp/status", "GET", undefined, user.cookie));
+    const stillEnrolledBody = (await stillEnrolled.json()) as { data: { enrolled: boolean } };
+    assert.equal(stillEnrolledBody.data.enrolled, true);
+    const passwordOnlyDelete = await deleteAccount(
+      apiRequest("/api/account", "DELETE", { confirmation: "totp-f@nexora.example.test", password: "totp user password f" }, user.cookie),
+    );
+    assert.equal(passwordOnlyDelete.status, 401);
+
+    // With the current code, re-enrollment opens and verifies.
+    const reopened = await totpSetup(
+      apiRequest("/api/account/totp/setup", "POST", { code: totpCode(secret, Date.now()) }, user.cookie),
+    );
+    assert.equal(reopened.status, 200, await reopened.clone().text());
+    const reopenedBody = (await reopened.json()) as { data: { setup: { secret: string } } };
+    const newSecret = reopenedBody.data.setup.secret;
+    assert.ok(newSecret && newSecret !== secret);
+    const reverified = await totpVerify(
+      apiRequest("/api/account/totp/verify", "POST", { code: totpCode(newSecret, Date.now()) }, user.cookie),
+    );
+    assert.equal(reverified.status, 200, await reverified.clone().text());
+    const enrolledAgain = await totpStatus(apiRequest("/api/account/totp/status", "GET", undefined, user.cookie));
+    const enrolledAgainBody = (await enrolledAgain.json()) as { data: { enrolled: boolean } };
+    assert.equal(enrolledAgainBody.data.enrolled, true);
+  },
+);
