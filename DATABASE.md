@@ -140,6 +140,48 @@ the model. No application code is included here.
   `id`: `audit_events.id` has no default, so 0058's insert
   failed every deletion with 23502. 0058 itself is not
   edited.
+- **Migration 0068 (2026-10-29 peek-function
+  correction, local only — not yet pushed):**
+  CREATE OR REPLACEs `count_auth_rate_limit_attempts()` with
+  0066's body verbatim except that `coalesce` is unqualified:
+  0066 wrote `pg_catalog.coalesce(...)`, which does not exist
+  (COALESCE is a SQL keyword expression, not a pg_catalog
+  function), so every peek call failed with 42883 and broke
+  the metrics lockout check and the operator-auth alert.
+  0066 itself is not edited. REVOKE/GRANT re-asserted.
+- **Migration 0067 (2026-10-29 authenticator
+  credentials, local only — not yet pushed):** new table
+  `nexora.user_totp_credentials` (user_id uuid PK REFERENCES
+  users(id) ON DELETE CASCADE, secret_ciphertext/nonce/tag
+  text NOT NULL, verified_at timestamptz NULL, created_at/
+  updated_at defaults). RLS enabled with four self policies
+  (SELECT/INSERT/UPDATE/DELETE, user_id =
+  `nexora.current_user_id()`); the app role holds SELECT on
+  all seven columns, INSERT on four (user_id + the three
+  secret columns — the INSERT writes only those four, the
+  other two come from defaults), UPDATE on five, DELETE on
+  the table. No extra index: every query is by the PK.
+  Also redefines the rate-limit CHECK and
+  `consume_auth_rate_limit` copying 0066's body plus the
+  `'totp-verify-user'` scope, which bounds enrollment
+  verification (10/hour per user, 30/hour per IP);
+  deletion-time codes need no new scope because the delete
+  routes' own rate limits already bound them.
+- **Migration 0066 (2026-10-29 operator DB guard and
+  lockout, local only — not yet pushed):** revokes EXECUTE
+  on `ai_operator_aggregate()` and `outbox_queue_depth()`
+  from `nexora_app` (the grant to the dedicated operator
+  role is deliberately NOT in the migration — GRANT to a
+  role that does not exist yet fails the migration, so the
+  owner runs that GRANT by hand); redefines the rate-limit
+  CHECK and `consume_auth_rate_limit` copying 0063's body
+  plus the `'operator-metrics-lockout'` scope; adds
+  `count_auth_rate_limit_attempts(scope, subject_hash
+  NULLABLE, window_seconds)` (SECURITY DEFINER, revoked
+  from PUBLIC, granted to `nexora_app`; NULL subject sums
+  the whole scope, otherwise one bucket; expired windows
+  count 0; invalid parameters raise 22023). See 0068 for
+  the `coalesce` correction to this function.
 - **Migration 0065 (2026-10-29 member-removal guards,
   applied to production 2026-10-29, 65 migrations,
   checksum verified):** redefines

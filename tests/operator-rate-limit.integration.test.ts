@@ -64,17 +64,24 @@ test(
   },
 );
 
+// The metrics 120/hour limit is now proven with VALID tokens, not
+// wrong ones: since migration 0066, five wrong tokens from one IP
+// lock that IP out for 15 minutes, so a 120-wrong-token run can no
+// longer reach the 121st call. Wrong-token behaviour is covered by
+// the lockout test in tests/operator-lockout.integration.test.ts;
+// this test still proves the 120/hour ceiling itself.
 test(
-  "metrics operator endpoint rate-limits repeated wrong tokens per IP",
+  "metrics operator endpoint rate-limits repeated valid tokens per IP",
   { skip: !connectionString },
   async () => {
     await withTrustedClientIp(async (ipHeader) => {
       const ip = "203.0.113.78";
+      const validToken = process.env.NEXORA_METRICS_TOKEN ?? "";
       for (let attempt = 1; attempt <= 120; attempt += 1) {
-        const response = await getMetrics(metricsRequest("wrong-token", ipHeader, ip));
-        assert.equal(response.status, 401, `attempt ${attempt} should be 401`);
+        const response = await getMetrics(metricsRequest(validToken, ipHeader, ip));
+        assert.equal(response.status, 200, `attempt ${attempt} should be 200`);
       }
-      const limited = await getMetrics(metricsRequest("wrong-token", ipHeader, ip));
+      const limited = await getMetrics(metricsRequest(validToken, ipHeader, ip));
       assert.equal(limited.status, 429);
     });
   },

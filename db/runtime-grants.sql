@@ -195,6 +195,10 @@ GRANT SELECT (organization_id, user_id, event_type, in_app_enabled, email_enable
   INSERT (organization_id, user_id, event_type, in_app_enabled, email_enabled),
   UPDATE (in_app_enabled, email_enabled, updated_at)
 ON TABLE nexora.notification_preferences TO nexora_app;
+GRANT SELECT (user_id, secret_ciphertext, secret_nonce, secret_tag, verified_at, created_at, updated_at),
+  INSERT (user_id, secret_ciphertext, secret_nonce, secret_tag),
+  UPDATE (secret_ciphertext, secret_nonce, secret_tag, verified_at, updated_at)
+ON TABLE nexora.user_totp_credentials TO nexora_app;
 GRANT EXECUTE ON FUNCTION nexora.notification_email_enabled(uuid, uuid, text) TO nexora_app;
 GRANT EXECUTE ON FUNCTION nexora.enqueue_notification_email_outbox(uuid, uuid, uuid, text, text, text, text) TO nexora_app;
 GRANT EXECUTE ON FUNCTION nexora.claim_notification_email_outbox(integer) TO nexora_app;
@@ -280,5 +284,6 @@ REVOKE ALL ON nexora.schema_migrations FROM nexora_app;
 -- (manager/self split). Audit events deliberately keep no DELETE grant.
 GRANT DELETE
 ON TABLE nexora.organization_invitations,
-  nexora.notification_preferences
+  nexora.notification_preferences,
+  nexora.user_totp_credentials
 TO nexora_app;

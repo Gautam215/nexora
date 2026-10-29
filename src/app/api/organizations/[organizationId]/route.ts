@@ -13,8 +13,14 @@ import {
 } from "../../../../server/api.ts";
 import { getAuthenticatedUser, getAuthPrincipal } from "../../../../server/auth.ts";
 import { isRateLimited } from "../../../../server/auth-rate-limit.ts";
-import { lookupLoginAccount, withOrganizationContext } from "../../../../server/db.ts";
+import {
+  lookupLoginAccount,
+  withOrganizationContext,
+  withUserContext,
+} from "../../../../server/db.ts";
+import { verifyTotpForDelete } from "../../../../server/totp.ts";
 import { verifyPassword } from "../../../../security/password.ts";
+import { TotpConfigurationError } from "../../../../security/totp.ts";
 
 export const runtime = "nodejs";
 
@@ -286,6 +292,26 @@ export async function DELETE(
     );
     if (!passwordMatches) {
       return jsonError(request, 401, "INVALID_CREDENTIALS", "The password is incorrect.");
+    }
+
+    // Second factor, when enrolled: same rule as account deletion.
+    // A configuration failure fails closed rather than skipping
+    // the factor.
+    try {
+      const totp = await withUserContext(principal.userId, async (transaction) => {
+        return verifyTotpForDelete(transaction, principal.userId, parsed.value.totpCode, Date.now());
+      });
+      if (totp === "missing-code") {
+        return jsonError(request, 401, "INVALID_CREDENTIALS", "An authenticator code is required.");
+      }
+      if (totp === "invalid") {
+        return jsonError(request, 401, "INVALID_CREDENTIALS", "The authenticator code is incorrect.");
+      }
+    } catch (error) {
+      if (error instanceof TotpConfigurationError) {
+        return jsonError(request, 503, "SERVICE_UNAVAILABLE", "Two-factor authentication is not configured.");
+      }
+      throw error;
     }
 
     const auditId = randomUUID();

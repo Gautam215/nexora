@@ -74,8 +74,128 @@ export default function AccountSettingsPage() {
   const [confirmDeleteAccount, setConfirmDeleteAccount] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
   const [deletePassword, setDeletePassword] = useState("");
+  const [deleteTotpCode, setDeleteTotpCode] = useState("");
   const [deletePending, setDeletePending] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+
+  const [totpEnrolled, setTotpEnrolled] = useState(false);
+  const [totpSetup, setTotpSetup] = useState<{ secret: string; otpauthUrl: string } | null>(null);
+  const [totpCode, setTotpCode] = useState("");
+  const [totpDisablePassword, setTotpDisablePassword] = useState("");
+  const [totpPending, setTotpPending] = useState(false);
+  const [totpError, setTotpError] = useState("");
+  const [totpSuccess, setTotpSuccess] = useState("");
+
+  const loadTotpStatus = useCallback(async () => {
+    try {
+      const response = await fetch("/api/account/totp/status", { cache: "no-store" });
+      const result = (await response.json().catch(() => null)) as ApiResult<{
+        enrolled: boolean;
+      }> | null;
+      if (response.ok) setTotpEnrolled(result?.data?.enrolled ?? false);
+    } catch {
+      // Status is a progressive enhancement: deletion still enforces
+      // the code server-side when enrolled, even if this read fails.
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadTotpStatus();
+  }, [loadTotpStatus]);
+
+  async function startTotpSetup() {
+    if (totpPending) return;
+    setTotpPending(true);
+    setTotpError("");
+    setTotpSuccess("");
+    try {
+      const response = await fetch("/api/account/totp/setup", { method: "POST" });
+      const result = (await response.json().catch(() => null)) as ApiResult<{
+        setup: { secret: string; otpauthUrl: string };
+      }> | null;
+      if (response.status === 401) {
+        window.location.assign("/login");
+        return;
+      }
+      if (!response.ok || !result?.data?.setup) {
+        setTotpError(apiErrorMessage(result, "Authenticator setup could not be started."));
+        return;
+      }
+      setTotpSetup(result.data.setup);
+    } catch {
+      setTotpError(NETWORK_ERROR);
+    } finally {
+      setTotpPending(false);
+    }
+  }
+
+  async function verifyTotpSetup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (totpPending) return;
+    setTotpPending(true);
+    setTotpError("");
+    setTotpSuccess("");
+    try {
+      const response = await fetch("/api/account/totp/verify", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ code: totpCode }),
+      });
+      const result = (await response.json().catch(() => null)) as ApiResult<{
+        enabled: boolean;
+      }> | null;
+      if (response.status === 401 && result?.error?.code === "AUTHENTICATION_REQUIRED") {
+        window.location.assign("/login");
+        return;
+      }
+      if (!response.ok || !result?.data?.enabled) {
+        setTotpError(apiErrorMessage(result, "Authenticator code could not be verified."));
+        return;
+      }
+      setTotpEnrolled(true);
+      setTotpSetup(null);
+      setTotpCode("");
+      setTotpSuccess("Authenticator enabled. Deleting your account or a workspace now also requires a code.");
+    } catch {
+      setTotpError(NETWORK_ERROR);
+    } finally {
+      setTotpPending(false);
+    }
+  }
+
+  async function disableTotp(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (totpPending) return;
+    setTotpPending(true);
+    setTotpError("");
+    setTotpSuccess("");
+    try {
+      const response = await fetch("/api/account/totp/disable", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ password: totpDisablePassword, code: totpCode }),
+      });
+      const result = (await response.json().catch(() => null)) as ApiResult<{
+        disabled: boolean;
+      }> | null;
+      if (response.status === 401 && result?.error?.code === "AUTHENTICATION_REQUIRED") {
+        window.location.assign("/login");
+        return;
+      }
+      if (!response.ok || !result?.data?.disabled) {
+        setTotpError(apiErrorMessage(result, "Authenticator could not be disabled."));
+        return;
+      }
+      setTotpEnrolled(false);
+      setTotpCode("");
+      setTotpDisablePassword("");
+      setTotpSuccess("Authenticator disabled.");
+    } catch {
+      setTotpError(NETWORK_ERROR);
+    } finally {
+      setTotpPending(false);
+    }
+  }
 
   const loadSessions = useCallback(async () => {
     setSessionsError("");
@@ -304,12 +424,19 @@ export default function AccountSettingsPage() {
       const response = await fetch("/api/account", {
         method: "DELETE",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ confirmation: deleteConfirmation, password: deletePassword }),
+        body: JSON.stringify({
+          confirmation: deleteConfirmation,
+          password: deletePassword,
+          ...(deleteTotpCode ? { totpCode: deleteTotpCode } : {}),
+        }),
       });
       const result = (await response.json().catch(() => null)) as ApiResult<{
         deleted: boolean;
       }> | null;
-      if (response.status === 401) {
+      // Only a session 401 redirects: a wrong or missing
+      // authenticator code is also a 401, but it must surface as
+      // a form error, not a sign-out.
+      if (response.status === 401 && result?.error?.code === "AUTHENTICATION_REQUIRED") {
         window.location.assign("/login");
         return;
       }
@@ -568,6 +695,90 @@ export default function AccountSettingsPage() {
                   </p>
                 )}
               </section>
+              <section className="account-section" aria-labelledby="totp-title">
+                <h3 id="totp-title">Two-factor authentication</h3>
+                <p className="account-section-copy">
+                  When enabled, deleting your account or a workspace requires your password
+                  plus a 6-digit code from an authenticator app (Google or Microsoft
+                  Authenticator), so a stolen session alone cannot destroy anything.
+                </p>
+                {totpError && (
+                  <p className="form-message form-error" role="alert">{totpError}</p>
+                )}
+                {totpSuccess && (
+                  <p className="form-message form-success" role="status" aria-live="polite">{totpSuccess}</p>
+                )}
+                {totpEnrolled ? (
+                  <form className="confirm-panel" onSubmit={disableTotp}>
+                    <p>Authenticator is enabled.</p>
+                    <label className="form-field">
+                      <span>Current password</span>
+                      <input
+                        type="password"
+                        value={totpDisablePassword}
+                        onChange={(event) => setTotpDisablePassword(event.target.value)}
+                        autoComplete="current-password"
+                        required
+                      />
+                    </label>
+                    <label className="form-field">
+                      <span>Authenticator code</span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={totpCode}
+                        onChange={(event) => setTotpCode(event.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+                        autoComplete="one-time-code"
+                        required
+                      />
+                    </label>
+                    <div className="confirm-actions">
+                      <button className="danger-button" type="submit" disabled={totpPending}>
+                        {totpPending ? "Disabling..." : "Disable authenticator"}
+                      </button>
+                    </div>
+                  </form>
+                ) : totpSetup ? (
+                  <form className="confirm-panel" onSubmit={verifyTotpSetup}>
+                    <p>
+                      Add this key to your authenticator app (manual entry), then enter the
+                      6-digit code it shows. The key is shown once.
+                    </p>
+                    <p>
+                      <span>Setup key: </span>
+                      <code>{totpSetup.secret}</code>
+                    </p>
+                    <p>
+                      <span>App URL: </span>
+                      <code>{totpSetup.otpauthUrl}</code>
+                    </p>
+                    <label className="form-field">
+                      <span>Authenticator code</span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={totpCode}
+                        onChange={(event) => setTotpCode(event.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+                        autoComplete="one-time-code"
+                        autoFocus
+                        required
+                      />
+                    </label>
+                    <div className="confirm-actions">
+                      <button className="primary-button" type="submit" disabled={totpPending}>
+                        {totpPending ? "Verifying..." : "Verify and enable"}
+                      </button>
+                      <button className="quiet-button" type="button" onClick={() => setTotpSetup(null)} disabled={totpPending}>
+                        Cancel setup
+                      </button>
+                    </div>
+                  </form>
+                ) : (
+                  <button className="quiet-button" type="button" onClick={() => void startTotpSetup()} disabled={totpPending}>
+                    {totpPending ? "Starting setup..." : "Set up authenticator"}
+                  </button>
+                )}
+              </section>
               <section className="account-section" aria-labelledby="data-title">
                 <h3 id="data-title">Your data</h3>
                 <p className="account-section-copy">
@@ -619,6 +830,19 @@ export default function AccountSettingsPage() {
                         required
                       />
                     </label>
+                    {totpEnrolled && (
+                      <label className="form-field">
+                        <span>Authenticator code</span>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          value={deleteTotpCode}
+                          onChange={(event) => setDeleteTotpCode(event.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+                          autoComplete="one-time-code"
+                          required
+                        />
+                      </label>
+                    )}
                     <div className="confirm-actions">
                       <button className="danger-button" type="submit" disabled={deletePending}>
                         {deletePending ? "Deleting..." : "Delete my account"}

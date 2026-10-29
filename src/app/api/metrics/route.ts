@@ -1,13 +1,22 @@
 import { timingSafeEqual } from "node:crypto";
 import type { NextRequest } from "next/server";
+import { evaluateOperatorAuthAlert } from "../../../server/alerts.ts";
 import { jsonError, jsonOk } from "../../../server/api.ts";
-import { isIpRateLimited } from "../../../server/auth-rate-limit.ts";
-import { RateLimitConfigurationError } from "../../../security/rate-limit.ts";
+import {
+  isIpLockedOut,
+  isIpRateLimited,
+  recordIpAuthFailure,
+} from "../../../server/auth-rate-limit.ts";
 import {
   checkDatabaseConnection,
+  countAuthRateLimitAttempts,
+  getAlertStateLastSent,
   getDatabasePoolStats,
   queryOperatorAggregates,
+  upsertAlertStateSent,
 } from "../../../server/db.ts";
+import { sendNotificationEmail } from "../../../server/email.ts";
+import { RateLimitConfigurationError } from "../../../security/rate-limit.ts";
 import { snapshotMetrics } from "../../../server/metrics.ts";
 
 export const runtime = "nodejs";
@@ -25,6 +34,12 @@ export const runtime = "nodejs";
 // rate limit (scope operator-metrics, 120/hour — migration 0063),
 // and every failed authentication is logged as a structured
 // operator.auth_failed event (endpoint only, never the token).
+// Since migration 0066, failures additionally feed a failures-only
+// lockout (scope operator-metrics-lockout, 5 per 15 minutes per
+// IP, checked before the token) and, at 10 failures in an hour,
+// one alert email via the alerts job's table and mailer (at most
+// one an hour). The lockout and the alert read the same rate-limit
+// rows nothing else writes, so no duplicate counter exists.
 function tokenMatches(request: NextRequest): boolean {
   const configured = process.env.NEXORA_METRICS_TOKEN;
   if (!configured) return false;
@@ -60,8 +75,25 @@ export async function GET(request: NextRequest) {
     }
     throw error;
   }
+  try {
+    if (await isIpLockedOut(request, "operator-metrics-lockout", 5, 900)) {
+      return jsonError(
+        request,
+        429,
+        "RATE_LIMITED",
+        "Too many attempts. Wait before trying again.",
+        { "retry-after": "900" },
+      );
+    }
+  } catch (error) {
+    if (error instanceof RateLimitConfigurationError) {
+      return jsonError(request, 503, "SERVICE_UNAVAILABLE", "Metrics are not configured.");
+    }
+    throw error;
+  }
   if (!tokenMatches(request)) {
     console.error(JSON.stringify({ event: "operator.auth_failed", endpoint: "metrics" }));
+    await recordOperatorMetricsFailure(request);
     return jsonError(request, 401, "AUTHENTICATION_REQUIRED", "Sign in to continue.");
   }
   const probeStarted = Date.now();
@@ -87,4 +119,28 @@ export async function GET(request: NextRequest) {
       pool: getDatabasePoolStats(),
     },
   });
+}
+
+// Best-effort: a failure anywhere here must never change the 401
+// above, and must never log the token. The failure count comes
+// from the lockout scope's own rows; suppression uses the alerts
+// job's alert_state row, and sending uses its mailer.
+async function recordOperatorMetricsFailure(request: NextRequest): Promise<void> {
+  try {
+    await recordIpAuthFailure(request, "operator-metrics-lockout", 5, 900);
+    const failures = await countAuthRateLimitAttempts("operator-metrics-lockout", null, 3600);
+    const recipient = process.env.NEXORA_ALERT_EMAIL?.trim() ?? "";
+    if (!recipient) return;
+    const lastSentAt = await getAlertStateLastSent("operator-auth-failures");
+    const evaluation = evaluateOperatorAuthAlert(failures, 10, lastSentAt, new Date());
+    if (!evaluation.triggered) return;
+    await sendNotificationEmail(
+      recipient,
+      "Nexora alert: operator authentication failures",
+      evaluation.detail,
+    );
+    await upsertAlertStateSent("operator-auth-failures", failures);
+  } catch {
+    console.error(JSON.stringify({ event: "operator.alert_failed", endpoint: "metrics" }));
+  }
 }

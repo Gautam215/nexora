@@ -99,7 +99,32 @@ own operating manual).
   0063) and every failed authentication is logged as a
   structured operator.auth_failed event (endpoint only, never
   the token); the metrics endpoint has the same protection
-  under scope operator-metrics. The file-retention/orphan cleanup
+  under scope operator-metrics. Operator hardening
+  (2026-10-29 controls round, local only until pushed):
+  the metrics route now authenticates before answering but
+  after its rate limit, locks an IP out for 15 minutes after
+  five failed tokens (peek-only scope
+  operator-metrics-lockout, migration 0066, corrected by
+  0068), alerts once per hour at ten global failures through
+  the existing alert state and mailer, and authenticates
+  cron calls before routing to a job (no lockout on cron, by
+  design). The two operator aggregate functions no longer
+  execute on the app pool at all: migration 0066 revoked
+  EXECUTE from `nexora_app`, and the metrics route runs
+  them through a separate operator pool
+  (`NEXORA_OPERATOR_DATABASE_URL`); the dedicated role is
+  created and granted by the database owner, not by any
+  migration. Authenticator second factor (2026-10-29,
+  migration 0067, local only until pushed): TOTP secrets
+  (RFC 6238, SHA-1, 30 s steps, 6 digits, ±1 step window)
+  are generated with the platform RNG, stored only as
+  AES-256-GCM ciphertext under `NEXORA_TOTP_ENCRYPTION_KEY`
+  in `nexora.user_totp_credentials` (RLS self policies),
+  and, once verified, gate account and workspace deletion
+  alongside the current password; enrollment shows the
+  manual key plus the otpauth:// URL (no QR library, no new
+  dependency), and unenrolled users proceed on password
+  alone by approved design. The file-retention/orphan cleanup
   script (`scripts/cleanup-task-files.mjs`) remains the
   operator-run fallback for object orphans. Backup remains an
   operator script: a serverless route cannot `pg_dump` as a

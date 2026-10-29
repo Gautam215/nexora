@@ -14,7 +14,7 @@ interface Organization {
 
 interface ApiResult {
   data?: { organization: Organization };
-  error?: { message?: string };
+  error?: { code?: string; message?: string };
 }
 
 export default function OrganizationPage({ organizationId }: { organizationId: string }) {
@@ -29,6 +29,8 @@ export default function OrganizationPage({ organizationId }: { organizationId: s
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteSlug, setDeleteSlug] = useState("");
   const [deletePassword, setDeletePassword] = useState("");
+  const [deleteTotpCode, setDeleteTotpCode] = useState("");
+  const [totpEnrolled, setTotpEnrolled] = useState(false);
   const [deletePending, setDeletePending] = useState(false);
   const [deleteError, setDeleteError] = useState("");
 
@@ -63,6 +65,18 @@ export default function OrganizationPage({ organizationId }: { organizationId: s
       }
     }
     void load();
+    async function loadTotpStatus() {
+      try {
+        const statusResponse = await fetch("/api/account/totp/status", { cache: "no-store" });
+        const statusResult = (await statusResponse.json().catch(() => null)) as {
+          data?: { enrolled: boolean };
+        } | null;
+        if (!cancelled && statusResponse.ok) setTotpEnrolled(statusResult?.data?.enrolled ?? false);
+      } catch {
+        // Deletion still enforces the code server-side when enrolled.
+      }
+    }
+    void loadTotpStatus();
     return () => {
       cancelled = true;
     };
@@ -240,6 +254,18 @@ export default function OrganizationPage({ organizationId }: { organizationId: s
                           autoComplete="current-password"
                         />
                       </label>
+                      {totpEnrolled && (
+                        <label className="form-field">
+                          <span>Authenticator code</span>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={deleteTotpCode}
+                            onChange={(event) => setDeleteTotpCode(event.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+                            autoComplete="one-time-code"
+                          />
+                        </label>
+                      )}
                       {deleteError && (
                         <p className="form-message form-error" role="alert">{deleteError}</p>
                       )}
@@ -247,7 +273,7 @@ export default function OrganizationPage({ organizationId }: { organizationId: s
                         <button
                           className="danger-button"
                           type="button"
-                          disabled={deletePending || deleteSlug !== organization.slug || !deletePassword}
+                          disabled={deletePending || deleteSlug !== organization.slug || !deletePassword || (totpEnrolled && deleteTotpCode.length !== 6)}
                           onClick={async () => {
                             if (deletePending) return;
                             setDeletePending(true);
@@ -258,11 +284,15 @@ export default function OrganizationPage({ organizationId }: { organizationId: s
                                 {
                                   method: "DELETE",
                                   headers: { "content-type": "application/json" },
-                                  body: JSON.stringify({ slug: deleteSlug, password: deletePassword }),
+                                  body: JSON.stringify({
+                                    slug: deleteSlug,
+                                    password: deletePassword,
+                                    ...(deleteTotpCode ? { totpCode: deleteTotpCode } : {}),
+                                  }),
                                 },
                               );
                               const result = (await response.json()) as ApiResult;
-                              if (response.status === 401) {
+                              if (response.status === 401 && result.error?.code === "AUTHENTICATION_REQUIRED") {
                                 window.location.assign("/login");
                                 return;
                               }
@@ -288,6 +318,7 @@ export default function OrganizationPage({ organizationId }: { organizationId: s
                           onClick={() => {
                             setConfirmDelete(false);
                             setDeleteSlug("");
+                            setDeleteTotpCode("");
                             setDeleteError("");
                           }}
                         >

@@ -33,15 +33,16 @@ export const runtime = "nodejs";
 // and every failed authentication is logged as a structured
 // operator.auth_failed event (endpoint only, never the token).
 // A correct token never fails, so legitimate cron traffic is
-// unaffected by the limit.
+// unaffected by the limit. Authentication runs before job
+// routing on purpose: an unauthenticated caller learns nothing
+// about which job names exist (unknown job + wrong token is a
+// 401, not a 404). There is deliberately no failure lockout here:
+// token spam must never be able to deny scheduled jobs.
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ job: string }> },
 ) {
   const { job } = await params;
-  if (!(SCHEDULED_JOBS as readonly string[]).includes(job)) {
-    return jsonError(request, 404, "JOB_NOT_FOUND", "Scheduled job not found.");
-  }
   try {
     try {
       if (await isIpRateLimited(request, "operator-cron", 120, 3600)) {
@@ -69,6 +70,9 @@ export async function GET(
     ) {
       console.error(JSON.stringify({ event: "operator.auth_failed", endpoint: `cron.${job}` }));
       throw new CronAuthenticationError();
+    }
+    if (!(SCHEDULED_JOBS as readonly string[]).includes(job)) {
+      return jsonError(request, 404, "JOB_NOT_FOUND", "Scheduled job not found.");
     }
     const result = await runScheduledJob(job as ScheduledJob);
     return jsonOk(request, { job, replay: result.replay, detail: result.detail });

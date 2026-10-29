@@ -154,9 +154,41 @@ export function getDatabasePoolStats(): {
 // 33). The AI and outbox aggregates run SECURITY DEFINER (migration
 // 0061) because the app role cannot read those tables directly;
 // scheduled_job_runs has no RLS and the app role holds SELECT on it.
-// Throws when the database is unreachable or migration 0061 has not
-// been applied yet; the metrics route degrades to operator: null in
-// that case instead of failing the whole endpoint.
+// Since migration 0066 the app role no longer holds EXECUTE on the
+// two aggregate functions at all: they run only through a separate
+// pool as the dedicated nexora_operator role (migration 0066 header
+// documents the role creation), so the database itself enforces
+// that no app-pool caller can reach them. Throws when the operator
+// pool is unconfigured, the database is unreachable, or migration
+// 0061 has not been applied yet; the metrics route degrades to
+// operator: null in that case instead of failing the whole endpoint.
+const globalForOperator = globalThis as typeof globalThis & {
+  nexoraOperatorPool?: Pool;
+};
+
+function getOperatorPool(): Pool {
+  if (globalForOperator.nexoraOperatorPool) return globalForOperator.nexoraOperatorPool;
+
+  const connectionString = process.env.NEXORA_OPERATOR_DATABASE_URL;
+  if (!connectionString) throw new Error("Operator database is not configured");
+  requireNeonSsl(connectionString);
+
+  const pool = new Pool({
+    connectionString: normalizeDatabaseConnectionString(connectionString),
+    application_name: "nexora-operator",
+    max: 2,
+    connectionTimeoutMillis: 5_000,
+    idleTimeoutMillis: 30_000,
+    statement_timeout: 10_000,
+    query_timeout: 12_000,
+  });
+  pool.on("error", (error) => {
+    console.error(JSON.stringify({ event: "database.pool_error", errorName: error.name }));
+  });
+  globalForOperator.nexoraOperatorPool = pool;
+  return pool;
+}
+
 export async function queryOperatorAggregates(): Promise<{
   ai: unknown;
   outbox: unknown;
@@ -166,10 +198,11 @@ export async function queryOperatorAggregates(): Promise<{
     lastRuns: Array<{ job: string; runDate: string; status: string }>;
   };
 }> {
-  const ai = await getPool().query<{ ai_operator_aggregate: unknown }>(
+  const operatorPool = getOperatorPool();
+  const ai = await operatorPool.query<{ ai_operator_aggregate: unknown }>(
     "SELECT nexora.ai_operator_aggregate() AS ai_operator_aggregate",
   );
-  const outbox = await getPool().query<{ outbox_queue_depth: unknown }>(
+  const outbox = await operatorPool.query<{ outbox_queue_depth: unknown }>(
     "SELECT nexora.outbox_queue_depth() AS outbox_queue_depth",
   );
   const jobs = await getPool().query<{
@@ -210,6 +243,50 @@ export async function closeDatabasePool(): Promise<void> {
   if (!pool) return;
   delete globalForDatabase.nexoraPool;
   await pool.end();
+}
+
+export async function closeOperatorPool(): Promise<void> {
+  const pool = globalForOperator.nexoraOperatorPool;
+  if (!pool) return;
+  delete globalForOperator.nexoraOperatorPool;
+  await pool.end();
+}
+
+// Read-only counter over the auth_rate_limits rows that
+// consume_auth_rate_limit writes (migration 0066). A null subject
+// sums the whole scope; a subject hash counts one bucket. Used by
+// the metrics lockout check and the operator-auth failure alert —
+// the same store, not a second counter.
+export async function countAuthRateLimitAttempts(
+  scope: string,
+  subjectHash: string | null,
+  windowSeconds: number,
+): Promise<number> {
+  const result = await getPool().query<{ counted: number }>(
+    "SELECT nexora.count_auth_rate_limit_attempts($1, $2, $3) AS counted",
+    [scope, subjectHash, windowSeconds],
+  );
+  return result.rows[0]?.counted ?? 0;
+}
+
+// Operator-auth alert suppression, reusing the alert_state table
+// the scheduled alerts job already writes (same rule/suppression
+// shape, no second alert store).
+export async function getAlertStateLastSent(rule: string): Promise<Date | null> {
+  const result = await getPool().query<{ last_sent_at: Date | null }>(
+    `SELECT last_sent_at FROM nexora.alert_state WHERE rule = $1`,
+    [rule],
+  );
+  return result.rows[0]?.last_sent_at ?? null;
+}
+
+export async function upsertAlertStateSent(rule: string, value: number): Promise<void> {
+  await getPool().query(
+    `INSERT INTO nexora.alert_state (rule, last_value, last_sent_at, updated_at)
+     VALUES ($1, $2, pg_catalog.now(), pg_catalog.now())
+     ON CONFLICT (rule) DO UPDATE SET last_value = $2, last_sent_at = pg_catalog.now(), updated_at = pg_catalog.now()`,
+    [rule, value],
+  );
 }
 
 // Scan-result application for the token-gated

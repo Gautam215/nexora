@@ -59,6 +59,40 @@ export function evaluateServerErrorAlert(
   };
 }
 
+// Operator-auth failures, evaluated inline by the metrics route
+// (not by the daily alerts job — an intrusion signal should not
+// wait a day). Same suppression shape as database-down: at most
+// one alert an hour, however many failures follow. The failure
+// count comes from the lockout scope's rows, so no second counter
+// exists; the route sends through sendNotificationEmail, the same
+// path the alerts job uses.
+export function evaluateOperatorAuthAlert(
+  failuresInWindow: number,
+  threshold: number,
+  lastSentAt: Date | null,
+  now: Date,
+): AlertEvaluation {
+  if (failuresInWindow < threshold) {
+    return {
+      rule: "operator-auth-failures",
+      triggered: false,
+      detail: `operator auth failures ${failuresInWindow}, threshold ${threshold}`,
+    };
+  }
+  if (lastSentAt !== null && now.getTime() - lastSentAt.getTime() < 60 * 60 * 1000) {
+    return {
+      rule: "operator-auth-failures",
+      triggered: false,
+      detail: "operator auth failures alerted within the last hour",
+    };
+  }
+  return {
+    rule: "operator-auth-failures",
+    triggered: true,
+    detail: `operator authentication failed ${failuresInWindow} times in the last hour`,
+  };
+}
+
 export function evaluateDatabaseDownAlert(
   databaseUp: boolean,
   lastSentAt: Date | null,
