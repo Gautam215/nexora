@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { BrandLogo } from "./brand-logo";
 
 export type AuthPageMode =
   | "login"
@@ -158,10 +159,7 @@ export default function AuthPage({ mode, nextPath }: AuthPageProps) {
   return (
     <main className="auth-layout">
       <aside className="auth-story">
-        <a className="brand" href="/" aria-label="Nexora home">
-          <span className="brand-mark" aria-hidden="true">N</span>
-          <span>Nexora</span>
-        </a>
+        <BrandLogo />
         <div className="auth-story-copy">
           <p className="eyebrow">Teamwork, with clarity</p>
           <h1>Make progress feel lighter.</h1>

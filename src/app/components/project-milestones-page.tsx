@@ -7,6 +7,7 @@ import {
   type MilestoneStatus,
 } from "../../security/milestone-status.ts";
 import ProjectWorkNav from "./project-work-nav";
+import { BrandLogo } from "./brand-logo";
 
 interface MilestoneDependency {
   id: string;
@@ -210,10 +211,7 @@ export default function ProjectMilestonesPage({
   return (
     <main className="auth-layout workspace-layout">
       <aside className="auth-story">
-        <a className="brand" href="/" aria-label="Nexora home">
-          <span className="brand-mark" aria-hidden="true">N</span>
-          <span>Nexora</span>
-        </a>
+        <BrandLogo />
         <div className="auth-story-copy">
           <p className="eyebrow">Project planning</p>
           <h1>Make the next finish line clear.</h1>

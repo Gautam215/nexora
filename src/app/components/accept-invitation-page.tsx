@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { BrandLogo } from "./brand-logo";
 
 const INVITATION_TOKEN_KEY = "nexora.pending-invitation";
 const LOGIN_URL = "/login?next=%2Faccept-invitation";
@@ -104,10 +105,7 @@ export default function AcceptInvitationPage() {
   return (
     <main className="auth-layout">
       <aside className="auth-story">
-        <a className="brand" href="/" aria-label="Nexora home">
-          <span className="brand-mark" aria-hidden="true">N</span>
-          <span>Nexora</span>
-        </a>
+        <BrandLogo />
         <div className="auth-story-copy">
           <p className="eyebrow">A place on the team</p>
           <h1>Good work moves together.</h1>

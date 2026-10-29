@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import type { SearchEntityType } from "../../security/search-schemas.ts";
+import { BrandLogo } from "./brand-logo";
 
 interface SearchResult {
   entity_type: SearchEntityType;
@@ -96,10 +97,7 @@ export default function OrganizationSearchPage({ organizationId }: { organizatio
   return (
     <main className="auth-layout workspace-layout">
       <aside className="auth-story">
-        <a className="brand" href="/" aria-label="Nexora home">
-          <span className="brand-mark" aria-hidden="true">N</span>
-          <span>Nexora</span>
-        </a>
+        <BrandLogo />
         <div className="auth-story-copy">
           <p className="eyebrow">Workspace search</p>
           <h1>Find the detail that moves work forward.</h1>

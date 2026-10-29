@@ -1,12 +1,8 @@
+import { BrandLogo } from "./components/brand-logo";
 export default function HomePage() {
   return (
     <main className="page-shell">
-      <header className="brand">
-        <span className="brand-mark" aria-hidden="true">
-          N
-        </span>
-        <span>Nexora</span>
-      </header>
+      <BrandLogo />
 
       <section className="intro" aria-labelledby="page-title">
         <p className="eyebrow">Nexora — AI-Powered Team Project Management &amp; Real-Time Collaboration</p>

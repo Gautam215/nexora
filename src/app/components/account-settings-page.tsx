@@ -7,6 +7,7 @@ import {
   passwordChangeSuccessMessage,
   validatePasswordChange,
 } from "./account-settings-helpers.ts";
+import { BrandLogo } from "./brand-logo";
 
 interface SessionUser {
   displayName: string;
@@ -468,10 +469,7 @@ export default function AccountSettingsPage() {
   return (
     <main className="auth-layout">
       <aside className="auth-story">
-        <a className="brand" href="/" aria-label="Nexora home">
-          <span className="brand-mark" aria-hidden="true">N</span>
-          <span>Nexora</span>
-        </a>
+        <BrandLogo />
         <div className="auth-story-copy">
           <p className="eyebrow">Account security</p>
           <h1>Keep your account in your hands.</h1>

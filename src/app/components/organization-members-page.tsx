@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { BrandLogo } from "./brand-logo";
 
 interface Member {
   user_id: string;
@@ -209,10 +210,7 @@ export default function OrganizationMembersPage({
   return (
     <main className="auth-layout workspace-layout">
       <aside className="auth-story">
-        <a className="brand" href="/" aria-label="Nexora home">
-          <span className="brand-mark" aria-hidden="true">N</span>
-          <span>Nexora</span>
-        </a>
+        <BrandLogo />
         <div className="auth-story-copy">
           <p className="eyebrow">People and permissions</p>
           <h1>Give access with intention.</h1>

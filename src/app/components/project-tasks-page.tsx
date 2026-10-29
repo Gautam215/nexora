@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type DragEvent, type FormEvent } from "react";
 import ProjectWorkNav from "./project-work-nav";
+import { BrandLogo } from "./brand-logo";
 
 type TaskPriority = "low" | "medium" | "high" | "urgent";
 type TaskView = "board" | "list";
@@ -499,10 +500,7 @@ export default function ProjectTasksPage({
   return (
     <main className="auth-layout workspace-layout">
       <aside className="auth-story">
-        <a className="brand" href="/" aria-label="Nexora home">
-          <span className="brand-mark" aria-hidden="true">N</span>
-          <span>Nexora</span>
-        </a>
+        <BrandLogo />
         <div className="auth-story-copy">
           <p className="eyebrow">Project execution</p>
           <h1>Turn commitments into the next clear action.</h1>

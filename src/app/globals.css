@@ -71,6 +71,13 @@ button {
   font-size: 15px;
 }
 
+.brand-logo {
+  display: block;
+  height: 32px;
+  width: auto;
+  border-radius: 8px;
+}
+
 .intro {
   width: min(100%, 690px);
   margin: 7vh auto 11vh;

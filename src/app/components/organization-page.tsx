@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import AiPlanningPanel from "./ai-planning-panel";
 import OrganizationProjects from "./organization-projects";
+import { BrandLogo } from "./brand-logo";
 
 interface Organization {
   id: string;
@@ -85,10 +86,7 @@ export default function OrganizationPage({ organizationId }: { organizationId: s
   return (
     <main className="auth-layout workspace-layout">
       <aside className="auth-story">
-        <a className="brand" href="/" aria-label="Nexora home">
-          <span className="brand-mark" aria-hidden="true">N</span>
-          <span>Nexora</span>
-        </a>
+        <BrandLogo />
         <div className="auth-story-copy">
           <p className="eyebrow">Workspace boundary</p>
           <h1>Keep the right work together.</h1>
