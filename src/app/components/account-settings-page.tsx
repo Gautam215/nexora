@@ -73,6 +73,7 @@ export default function AccountSettingsPage() {
   const [exportSuccess, setExportSuccess] = useState("");
   const [confirmDeleteAccount, setConfirmDeleteAccount] = useState(false);
   const [deleteConfirmation, setDeleteConfirmation] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
   const [deletePending, setDeletePending] = useState(false);
   const [deleteError, setDeleteError] = useState("");
 
@@ -303,7 +304,7 @@ export default function AccountSettingsPage() {
       const response = await fetch("/api/account", {
         method: "DELETE",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ confirmation: deleteConfirmation }),
+        body: JSON.stringify({ confirmation: deleteConfirmation, password: deletePassword }),
       });
       const result = (await response.json().catch(() => null)) as ApiResult<{
         deleted: boolean;
@@ -595,7 +596,7 @@ export default function AccountSettingsPage() {
                 {confirmDeleteAccount ? (
                   <form className="confirm-panel" onSubmit={deleteAccount}>
                     <p>
-                      To delete this account, type your email address ({user?.email}) below.
+                      To delete this account, type your email address ({user?.email}) and your current password below.
                     </p>
                     <label className="form-field">
                       <span>Confirm email address</span>
@@ -605,6 +606,16 @@ export default function AccountSettingsPage() {
                         onChange={(event) => setDeleteConfirmation(event.target.value)}
                         autoComplete="off"
                         autoFocus
+                        required
+                      />
+                    </label>
+                    <label className="form-field">
+                      <span>Current password</span>
+                      <input
+                        type="password"
+                        value={deletePassword}
+                        onChange={(event) => setDeletePassword(event.target.value)}
+                        autoComplete="current-password"
                         required
                       />
                     </label>

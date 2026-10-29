@@ -11,9 +11,10 @@ import {
   jsonServerFailure,
   parseJson,
 } from "../../../../server/api.ts";
-import { getAuthPrincipal } from "../../../../server/auth.ts";
+import { getAuthenticatedUser, getAuthPrincipal } from "../../../../server/auth.ts";
 import { isRateLimited } from "../../../../server/auth-rate-limit.ts";
-import { withOrganizationContext } from "../../../../server/db.ts";
+import { lookupLoginAccount, withOrganizationContext } from "../../../../server/db.ts";
+import { verifyPassword } from "../../../../security/password.ts";
 
 export const runtime = "nodejs";
 
@@ -270,6 +271,21 @@ export async function DELETE(
         "Too many workspace changes. Wait before trying again.",
         { "retry-after": "3600" },
       );
+    }
+
+    // Destructive-action re-entry: the owner's current password,
+    // so a stolen session alone cannot destroy the workspace.
+    const caller = await getAuthenticatedUser(principal);
+    if (!caller) {
+      return jsonError(request, 401, "AUTHENTICATION_REQUIRED", "Sign in to continue.");
+    }
+    const loginAccount = await lookupLoginAccount(caller.email);
+    const passwordMatches = await verifyPassword(
+      parsed.value.password,
+      loginAccount?.password_hash,
+    );
+    if (!passwordMatches) {
+      return jsonError(request, 401, "INVALID_CREDENTIALS", "The password is incorrect.");
     }
 
     const auditId = randomUUID();

@@ -111,6 +111,23 @@ local hardware, and no deployed-environment measurement.
 This closes the "no concurrency" gap of the round-4 run; it
 does not close the production-acceptance gap.
 
+Correction 2026-10-28 (10x dataset, benchmark artifact):
+the Step 1 concurrent list_tasks p95 of 190.94 ms reported
+in docs/scalability-plan.md came from a global ORDER BY
+created_at that seq-scanned all 50000 rows — a query the app
+never runs, since the real task-list route always filters by
+organization + project (sort=createdAt). The benchmark was
+fixed to measure the scoped shape and re-run on the same 10x
+dataset (2000 orgs / 5000 projects / 50000 tasks):
+list_tasks sequential p95 1.21 ms, concurrent p95 17.62 ms;
+all five shapes concurrent p95 under 100 ms (list_projects
+39.76, list_tasks 17.62, search_files_by_name 12.89,
+list_notifications 16.21, org_storage_usage 65.53). The
+scoped plan is an index scan (0.12 ms single-run), so no
+index migration was added. The production-acceptance gap
+itself is unchanged: these are still local numbers, not
+production-dataset evidence.
+
 ## Timeout, retry, and circuit-breaker inventory
 
 - Database pool: statement timeout 10 s, query timeout 12 s

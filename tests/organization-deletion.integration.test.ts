@@ -90,7 +90,7 @@ async function registerVerifyAndLogin(email: string, name: string, password: str
   const cookie = loginResponse.headers.get("set-cookie")?.match(/nexora_session=([^;]+)/)?.[1];
   assert.ok(cookie);
   const result = (await loginResponse.json()) as { data: { user: { id: string } } };
-  return { userId: result.data.user.id, cookie: `nexora_session=${cookie}`, email };
+  return { userId: result.data.user.id, cookie: `nexora_session=${cookie}`, email, password };
 }
 
 async function createWorkspace(cookie: string, slug: string) {
@@ -136,9 +136,14 @@ async function createProjectAs(cookie: string, organizationId: string, name: str
   return body.data.project;
 }
 
-async function deleteOrganizationAs(cookie: string, organizationId: string, body: unknown) {
+async function deleteOrganizationAs(
+  cookie: string,
+  organizationId: string,
+  body: Record<string, unknown>,
+  password: string,
+) {
   return deleteOrganization(
-    apiRequest(`/api/organizations/${organizationId}`, "DELETE", body, cookie),
+    apiRequest(`/api/organizations/${organizationId}`, "DELETE", { ...body, password }, cookie),
     { params: Promise.resolve({ organizationId }) },
   );
 }
@@ -246,7 +251,7 @@ test(
       await inviteAndAccept(owner.cookie, organizationId, admin.email, "admin", admin.cookie);
       await inviteAndAccept(owner.cookie, organizationId, member.email, "member", member.cookie);
 
-      const deleted = await deleteOrganizationAs(owner.cookie, organizationId, { slug });
+      const deleted = await deleteOrganizationAs(owner.cookie, organizationId, { slug }, owner.password);
       assert.equal(deleted.status, 200);
       const body = (await deleted.json()) as { data: { organizationId: string; deleted: boolean } };
       assert.equal(body.data.organizationId, organizationId);
@@ -304,26 +309,32 @@ test(
       await inviteAndAccept(owner.cookie, organizationId, admin.email, "admin", admin.cookie);
       await inviteAndAccept(owner.cookie, organizationId, member.email, "member", member.cookie);
 
-      const byAdmin = await deleteOrganizationAs(admin.cookie, organizationId, { slug });
+      const byAdmin = await deleteOrganizationAs(admin.cookie, organizationId, { slug }, admin.password);
       assert.equal(byAdmin.status, 403);
-      const byMember = await deleteOrganizationAs(member.cookie, organizationId, { slug });
+      const byMember = await deleteOrganizationAs(member.cookie, organizationId, { slug }, member.password);
       assert.equal(byMember.status, 403);
-      const byOutsider = await deleteOrganizationAs(outsider.cookie, organizationId, { slug });
+      const byOutsider = await deleteOrganizationAs(outsider.cookie, organizationId, { slug }, outsider.password);
       assert.equal(byOutsider.status, 403);
       const outsiderBody = (await byOutsider.json()) as { error: { code: string } };
       assert.equal(outsiderBody.error.code, "ORGANIZATION_ACCESS_DENIED");
 
-      const wrongSlug = await deleteOrganizationAs(owner.cookie, organizationId, { slug: "not-this-slug" });
+      const wrongSlug = await deleteOrganizationAs(owner.cookie, organizationId, { slug: "not-this-slug" }, owner.password);
       assert.equal(wrongSlug.status, 409);
       const wrongSlugBody = (await wrongSlug.json()) as { error: { code: string } };
       assert.equal(wrongSlugBody.error.code, "ORGANIZATION_SLUG_MISMATCH");
 
-      const missingSlug = await deleteOrganizationAs(owner.cookie, organizationId, {});
+      // Wrong password is rejected even with the right slug, and
+      // the workspace survives: a stolen session alone cannot
+      // destroy it. The delete below still succeeding proves it.
+      const wrongPassword = await deleteOrganizationAs(owner.cookie, organizationId, { slug }, "not-the-password");
+      assert.equal(wrongPassword.status, 401);
+
+      const missingSlug = await deleteOrganizationAs(owner.cookie, organizationId, {}, owner.password);
       assert.equal(missingSlug.status, 400);
 
-      const deleted = await deleteOrganizationAs(owner.cookie, organizationId, { slug });
+      const deleted = await deleteOrganizationAs(owner.cookie, organizationId, { slug }, owner.password);
       assert.equal(deleted.status, 200);
-      const again = await deleteOrganizationAs(owner.cookie, organizationId, { slug });
+      const again = await deleteOrganizationAs(owner.cookie, organizationId, { slug }, owner.password);
       assert.equal(again.status, 404);
 
       // The tombstone keeps the slug reserved even after deletion.
@@ -403,14 +414,14 @@ test(
       const youngSlug = `young-${owner.userId.slice(0, 8)}`;
       const youngOrganizationId = await createWorkspace(owner.cookie, youngSlug);
       await createProjectAs(owner.cookie, youngOrganizationId, "Young Project");
-      const youngDeleted = await deleteOrganizationAs(owner.cookie, youngOrganizationId, { slug: youngSlug });
+      const youngDeleted = await deleteOrganizationAs(owner.cookie, youngOrganizationId, { slug: youngSlug }, owner.password);
       assert.equal(youngDeleted.status, 200);
       await migratorQuery(
         "UPDATE nexora.organizations SET deleted_at = pg_catalog.now() - interval '29 days' WHERE id = $1",
         [youngOrganizationId],
       );
 
-      const deleted = await deleteOrganizationAs(owner.cookie, organizationId, { slug });
+      const deleted = await deleteOrganizationAs(owner.cookie, organizationId, { slug }, owner.password);
       assert.equal(deleted.status, 200);
       await migratorQuery(
         "UPDATE nexora.organizations SET deleted_at = pg_catalog.now() - interval '31 days' WHERE id = $1",
@@ -491,7 +502,7 @@ test(
         [scriptOwner.userId, organizationId, project.id, randomUUID(), randomUUID(), storageKey],
       );
       await writeFile(path.join(privateFilesRoot, `${storageKey}.blob`), "script");
-      const deleted = await deleteOrganizationAs(scriptOwner.cookie, organizationId, { slug });
+      const deleted = await deleteOrganizationAs(scriptOwner.cookie, organizationId, { slug }, scriptOwner.password);
       assert.equal(deleted.status, 200);
       await migratorQuery(
         "UPDATE nexora.organizations SET deleted_at = pg_catalog.now() - interval '31 days' WHERE id = $1",

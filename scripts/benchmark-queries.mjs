@@ -81,13 +81,30 @@ try {
   // benchmark uses the runtime role without a tenant session, so
   // these timings are query-shape timings, not tenant-filtered
   // timings, and are labelled as such in docs/performance.md.
+  // list_tasks is the exception that must stay tenant-scoped: the
+  // real task-list route always filters by organization + project
+  // and sorts within that project (sort=createdAt). A global
+  // ORDER BY created_at measured a query the app never runs — on
+  // 2026-10-28 it seq-scanned all 50000 rows and reported a
+  // concurrent p95 of 190.94 ms, while the real scoped shape runs
+  // at 0.12 ms single-run and 46 ms concurrent p95. The pair below
+  // is picked from the seeded data so the script stays
+  // self-contained; every seeded project holds ~10 tasks, so any
+  // real pair represents the route's shape.
+  const scopedPair = await pool.query(
+    `SELECT organization_id, project_id FROM nexora.tasks GROUP BY organization_id, project_id ORDER BY count(*) DESC LIMIT 1`,
+  );
+  const scopedTaskParams = scopedPair.rows.length === 0
+    ? null
+    : [scopedPair.rows[0].organization_id, scopedPair.rows[0].project_id];
+  const scopedTaskSql = `SELECT id, title, workflow_status_id FROM nexora.tasks WHERE organization_id = $1 AND project_id = $2 AND archived_at IS NULL ORDER BY created_at DESC, id ASC LIMIT 50`;
   await measure("list_projects", "SELECT id, name, status FROM nexora.projects ORDER BY created_at DESC LIMIT 50", []);
-  await measure("list_tasks", "SELECT id, title, workflow_status_id FROM nexora.tasks ORDER BY created_at DESC LIMIT 50", []);
+  if (scopedTaskParams) await measure("list_tasks", scopedTaskSql, scopedTaskParams);
   await measure("search_files_by_name", "SELECT id, original_filename FROM nexora.task_files WHERE original_filename ILIKE $1 LIMIT 50", ["%release%"]);
   await measure("list_notifications", "SELECT id, title, created_at FROM nexora.notifications ORDER BY created_at DESC LIMIT 50", []);
   await measure("org_storage_usage", "SELECT COALESCE(sum(byte_size), 0) FROM nexora.task_files WHERE deleted_at IS NULL", []);
   await measureConcurrent("list_projects", "SELECT id, name, status FROM nexora.projects ORDER BY created_at DESC LIMIT 50", []);
-  await measureConcurrent("list_tasks", "SELECT id, title, workflow_status_id FROM nexora.tasks ORDER BY created_at DESC LIMIT 50", []);
+  if (scopedTaskParams) await measureConcurrent("list_tasks", scopedTaskSql, scopedTaskParams);
   await measureConcurrent("search_files_by_name", "SELECT id, original_filename FROM nexora.task_files WHERE original_filename ILIKE $1 LIMIT 50", ["%release%"]);
   await measureConcurrent("list_notifications", "SELECT id, title, created_at FROM nexora.notifications ORDER BY created_at DESC LIMIT 50", []);
   await measureConcurrent("org_storage_usage", "SELECT COALESCE(sum(byte_size), 0) FROM nexora.task_files WHERE deleted_at IS NULL", []);

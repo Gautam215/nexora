@@ -13,13 +13,16 @@ import {
   jsonServerFailure,
   parseJson,
 } from "../../../server/api.ts";
-import { withUserContext } from "../../../server/db.ts";
+import { lookupLoginAccount, withUserContext } from "../../../server/db.ts";
+import { verifyPassword } from "../../../security/password.ts";
 
 export const runtime = "nodejs";
 
 // DELETE /api/account — delete the caller's own account. The request
 // body must carry the account's email as typed confirmation, mirroring
-// the workspace-deletion slug confirmation. The SECURITY DEFINER
+// the workspace-deletion slug confirmation, AND the current password:
+// a stolen session alone must not be able to destroy the account.
+// The SECURITY DEFINER
 // helper scrubs the user row (it never hard-deletes it, because the
 // row anchors history), disables every workspace membership, revokes
 // every session, and blocks deletion while the caller is the sole
@@ -50,6 +53,14 @@ export async function DELETE(request: NextRequest) {
         "Too many attempts. Wait before trying again.",
         { "retry-after": "3600" },
       );
+    }
+    const loginAccount = await lookupLoginAccount(user.email);
+    const passwordMatches = await verifyPassword(
+      parsed.value.password,
+      loginAccount?.password_hash,
+    );
+    if (!passwordMatches) {
+      return jsonError(request, 401, "INVALID_CREDENTIALS", "The password is incorrect.");
     }
     if (parsed.value.confirmation !== user.email) {
       return jsonError(

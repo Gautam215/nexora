@@ -28,6 +28,7 @@ export default function OrganizationPage({ organizationId }: { organizationId: s
   const [settingsSaved, setSettingsSaved] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleteSlug, setDeleteSlug] = useState("");
+  const [deletePassword, setDeletePassword] = useState("");
   const [deletePending, setDeletePending] = useState(false);
   const [deleteError, setDeleteError] = useState("");
 
@@ -230,6 +231,15 @@ export default function OrganizationPage({ organizationId }: { organizationId: s
                           autoComplete="off"
                         />
                       </label>
+                      <label className="form-field">
+                        <span>Your current password</span>
+                        <input
+                          type="password"
+                          value={deletePassword}
+                          onChange={(event) => setDeletePassword(event.target.value)}
+                          autoComplete="current-password"
+                        />
+                      </label>
                       {deleteError && (
                         <p className="form-message form-error" role="alert">{deleteError}</p>
                       )}
@@ -237,7 +247,7 @@ export default function OrganizationPage({ organizationId }: { organizationId: s
                         <button
                           className="danger-button"
                           type="button"
-                          disabled={deletePending || deleteSlug !== organization.slug}
+                          disabled={deletePending || deleteSlug !== organization.slug || !deletePassword}
                           onClick={async () => {
                             if (deletePending) return;
                             setDeletePending(true);
@@ -248,7 +258,7 @@ export default function OrganizationPage({ organizationId }: { organizationId: s
                                 {
                                   method: "DELETE",
                                   headers: { "content-type": "application/json" },
-                                  body: JSON.stringify({ slug: deleteSlug }),
+                                  body: JSON.stringify({ slug: deleteSlug, password: deletePassword }),
                                 },
                               );
                               const result = (await response.json()) as ApiResult;

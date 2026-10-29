@@ -50,8 +50,13 @@ export const changePasswordSchema = z.strictObject({
   newPassword: password,
 });
 
+// Destructive-action re-entry: deleting an account requires the
+// current password in addition to the typed-email confirmation,
+// so a stolen session alone cannot destroy the account. The login
+// shape (1–128) is used so a legacy short password still verifies.
 export const accountDeletionSchema = z.strictObject({
   confirmation: email,
+  password: loginPassword,
 });
 
 export const sessionRevokeSchema = z.strictObject({
@@ -76,6 +81,10 @@ export const organizationDeleteSchema = z.strictObject({
   // current slug. A mismatch is a conflict, not a validation failure,
   // because the slug itself is well-formed but does not match.
   slug: z.string().trim().toLowerCase().min(2).max(63).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
+  // Destructive-action re-entry, same rule as account deletion:
+  // the owner's current password, so a stolen session alone cannot
+  // destroy the workspace.
+  password: loginPassword,
 });
 
 export const organizationUpdateSchema = z

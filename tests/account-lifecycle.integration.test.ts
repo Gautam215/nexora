@@ -165,27 +165,37 @@ test(
 
     // Wrong confirmation email is rejected and the account survives.
     const wrongDelete = await deleteAccount(
-      apiRequest("/api/account", "DELETE", { confirmation: "someone-else@example.test" }, user.cookie),
+      apiRequest("/api/account", "DELETE", { confirmation: "someone-else@example.test", password: user.password }, user.cookie),
     );
     assert.equal(wrongDelete.status, 409);
     const stillIn = await login(apiRequest("/api/auth/login", "POST", { email: user.email, password: user.password }));
     assert.equal(stillIn.status, 200);
 
+    // Wrong password is rejected even with the right confirmation,
+    // and the account survives: a stolen session alone cannot
+    // destroy the account.
+    const wrongPassword = await deleteAccount(
+      apiRequest("/api/account", "DELETE", { confirmation: user.email, password: "not-the-password" }, user.cookie),
+    );
+    assert.equal(wrongPassword.status, 401);
+    const stillInAfterWrongPassword = await login(apiRequest("/api/auth/login", "POST", { email: user.email, password: user.password }));
+    assert.equal(stillInAfterWrongPassword.status, 200);
+
     // The account owns its workspace, so deletion is blocked until the
     // workspace itself is deleted (the app has no ownership transfer).
     const blockedFirst = await deleteAccount(
-      apiRequest("/api/account", "DELETE", { confirmation: user.email }, user.cookie),
+      apiRequest("/api/account", "DELETE", { confirmation: user.email, password: user.password }, user.cookie),
     );
     assert.equal(blockedFirst.status, 409, await blockedFirst.clone().text());
     const orgDeleted = await deleteOrganization(
-      apiRequest(`/api/organizations/${organizationId}`, "DELETE", { slug: org.data.organization.slug }, user.cookie),
+      apiRequest(`/api/organizations/${organizationId}`, "DELETE", { slug: org.data.organization.slug, password: user.password }, user.cookie),
       { params: Promise.resolve({ organizationId }) },
     );
     assert.equal(orgDeleted.status, 200, await orgDeleted.clone().text());
 
     // Correct confirmation deletes the account.
     const deleted = await deleteAccount(
-      apiRequest("/api/account", "DELETE", { confirmation: user.email }, user.cookie),
+      apiRequest("/api/account", "DELETE", { confirmation: user.email, password: user.password }, user.cookie),
     );
     assert.equal(deleted.status, 200, await deleted.clone().text());
     assert.ok(deleted.headers.get("set-cookie")?.includes("nexora_session=;"));
@@ -238,7 +248,7 @@ test(
     assert.equal(soloResponse.status, 201, await soloResponse.clone().text());
     const solo = (await soloResponse.json()) as { data: { organization: { id: string; slug: string } } };
     const blocked = await deleteAccount(
-      apiRequest("/api/account", "DELETE", { confirmation: owner.email }, owner.cookie),
+      apiRequest("/api/account", "DELETE", { confirmation: owner.email, password: owner.password }, owner.cookie),
     );
     assert.equal(blocked.status, 409, await blocked.clone().text());
     const blockedBody = (await blocked.json()) as { error: { code: string; message: string } };

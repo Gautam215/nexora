@@ -1,6 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { jsonError, jsonOk } from "../../../server/api.ts";
+import { isIpRateLimited } from "../../../server/auth-rate-limit.ts";
+import { RateLimitConfigurationError } from "../../../security/rate-limit.ts";
 import {
   checkDatabaseConnection,
   getDatabasePoolStats,
@@ -19,6 +21,10 @@ export const runtime = "nodejs";
 // user data, request bodies, query strings, or credentials. Counters
 // are process-local (see src/server/metrics.ts); a multi-instance
 // deployment aggregates across instances externally.
+// Operator hardening: every call consumes the DB-backed per-IP
+// rate limit (scope operator-metrics, 120/hour — migration 0063),
+// and every failed authentication is logged as a structured
+// operator.auth_failed event (endpoint only, never the token).
 function tokenMatches(request: NextRequest): boolean {
   const configured = process.env.NEXORA_METRICS_TOKEN;
   if (!configured) return false;
@@ -38,7 +44,24 @@ export async function GET(request: NextRequest) {
       "Metrics are not configured.",
     );
   }
+  try {
+    if (await isIpRateLimited(request, "operator-metrics", 120, 3600)) {
+      return jsonError(
+        request,
+        429,
+        "RATE_LIMITED",
+        "Too many attempts. Wait before trying again.",
+        { "retry-after": "3600" },
+      );
+    }
+  } catch (error) {
+    if (error instanceof RateLimitConfigurationError) {
+      return jsonError(request, 503, "SERVICE_UNAVAILABLE", "Metrics are not configured.");
+    }
+    throw error;
+  }
   if (!tokenMatches(request)) {
+    console.error(JSON.stringify({ event: "operator.auth_failed", endpoint: "metrics" }));
     return jsonError(request, 401, "AUTHENTICATION_REQUIRED", "Sign in to continue.");
   }
   const probeStarted = Date.now();

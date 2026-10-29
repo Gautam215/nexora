@@ -1,5 +1,7 @@
 import type { NextRequest } from "next/server";
 import { jsonError, jsonOk, jsonServerFailure } from "../../../../server/api.ts";
+import { isIpRateLimited } from "../../../../server/auth-rate-limit.ts";
+import { RateLimitConfigurationError } from "../../../../security/rate-limit.ts";
 import {
   CronAuthenticationError,
   CronConfigurationError,
@@ -26,6 +28,12 @@ export const runtime = "nodejs";
 // idempotent per day (see src/server/scheduled.ts), so a retried
 // cron call replays instead of repeating work. The schedule
 // itself lives in vercel.json, documented in docs/deployment.md §6.
+// Operator hardening: every call consumes the DB-backed per-IP
+// rate limit (scope operator-cron, 120/hour — migration 0063),
+// and every failed authentication is logged as a structured
+// operator.auth_failed event (endpoint only, never the token).
+// A correct token never fails, so legitimate cron traffic is
+// unaffected by the limit.
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ job: string }> },
@@ -35,6 +43,22 @@ export async function GET(
     return jsonError(request, 404, "JOB_NOT_FOUND", "Scheduled job not found.");
   }
   try {
+    try {
+      if (await isIpRateLimited(request, "operator-cron", 120, 3600)) {
+        return jsonError(
+          request,
+          429,
+          "RATE_LIMITED",
+          "Too many attempts. Wait before trying again.",
+          { "retry-after": "3600" },
+        );
+      }
+    } catch (error) {
+      if (error instanceof RateLimitConfigurationError) {
+        return jsonError(request, 503, "SERVICE_UNAVAILABLE", "Scheduled jobs are not configured.");
+      }
+      throw error;
+    }
     const authorization = request.headers.get("authorization");
     const bearer = authorization?.startsWith("Bearer ")
       ? authorization.slice("Bearer ".length)
@@ -43,6 +67,7 @@ export async function GET(
       !cronTokenMatches(request.headers.get("x-nexora-cron-token")) &&
       !cronTokenMatches(bearer)
     ) {
+      console.error(JSON.stringify({ event: "operator.auth_failed", endpoint: `cron.${job}` }));
       throw new CronAuthenticationError();
     }
     const result = await runScheduledJob(job as ScheduledJob);

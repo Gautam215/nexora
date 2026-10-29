@@ -3031,6 +3031,10 @@ h1 {
   font-size: 9px;
 }
 
+.task-file-scan-warning {
+  color: #e6c87a;
+}
+
 .task-file-actions {
   display: flex;
   flex: 0 0 auto;

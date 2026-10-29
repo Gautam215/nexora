@@ -89,10 +89,12 @@ test("workspace settings accept a partial update with the creation rules", () =>
 });
 
 test("workspace deletion requires the exact current slug", () => {
-  const parsed = organizationDeleteSchema.safeParse({ slug: "  My-Workspace  " });
+  const parsed = organizationDeleteSchema.safeParse({ slug: "  My-Workspace  ", password: "owner-password-one" });
   assert.equal(parsed.success, true);
   if (parsed.success) assert.equal(parsed.data.slug, "my-workspace");
   assert.equal(organizationDeleteSchema.safeParse({}).success, false);
-  assert.equal(organizationDeleteSchema.safeParse({ slug: "bad--slug" }).success, false);
-  assert.equal(organizationDeleteSchema.safeParse({ slug: "ok-slug", name: "Extra" }).success, false);
+  assert.equal(organizationDeleteSchema.safeParse({ slug: "bad--slug", password: "owner-password-one" }).success, false);
+  assert.equal(organizationDeleteSchema.safeParse({ slug: "ok-slug", name: "Extra", password: "owner-password-one" }).success, false);
+  // Password re-entry (2026-10-28 security round) is required, not optional.
+  assert.equal(organizationDeleteSchema.safeParse({ slug: "ok-slug" }).success, false);
 });
