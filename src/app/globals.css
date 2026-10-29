@@ -8,6 +8,10 @@
   --border: #303538;
   --accent: #a9c2b0;
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", sans-serif;
+  --button-bg: rgba(255, 255, 255, 0.12);
+  --button-bg-hover: rgba(255, 255, 255, 0.18);
+  --button-border: rgba(255, 255, 255, 0.14);
+  --button-border-hover: rgba(255, 255, 255, 0.28);
 }
 
 * {
@@ -152,27 +156,12 @@ button {
   line-height: 1.8;
 }
 
-/* Home hero primary action: glass pill over the photo. Scoped to the
-   hero only, so every other page keeps the solid primary button. */
+/* Home hero primary action: same glass pill as every primary button,
+   only larger. */
 .home-hero .primary-button {
   min-height: 52px;
   padding: 13px 26px;
-  border: 1px solid rgb(255 255 255 / 28%);
-  border-radius: 999px;
-  background: rgb(255 255 255 / 14%);
-  -webkit-backdrop-filter: blur(16px) saturate(1.4);
-  backdrop-filter: blur(16px) saturate(1.4);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 28%);
-  color: #ffffff;
   font-size: 15px;
-  transition: background-color 200ms ease, border-color 200ms ease, transform 200ms ease, box-shadow 200ms ease;
-}
-
-.home-hero .primary-button:hover:not(:disabled) {
-  transform: translateY(-1px);
-  border-color: rgb(255 255 255 / 40%);
-  background: rgb(255 255 255 / 22%);
-  box-shadow: 0 12px 28px rgb(0 0 0 / 32%);
 }
 
 /* Home hero sign-in: plain text link, underline only on hover/focus. */
@@ -188,11 +177,11 @@ button {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .home-hero .primary-button {
+  .primary-button {
     transition: none;
   }
 
-  .home-hero .primary-button:hover:not(:disabled) {
+  .primary-button:active:not(:disabled) {
     transform: none;
   }
 }
@@ -590,25 +579,38 @@ h1 {
 
 .primary-button {
   display: inline-flex;
-  min-height: 47px;
+  min-height: 44px;
   align-items: center;
   justify-content: center;
-  padding: 11px 18px;
-  border: 1px solid #bfd2c4;
-  border-radius: 8px;
-  background: #b5caba;
-  color: #111713;
+  padding: 12px 20px;
+  border: 1px solid var(--button-border);
+  border-radius: 999px;
+  background: var(--button-bg);
+  -webkit-backdrop-filter: blur(18px) saturate(1.25);
+  backdrop-filter: blur(18px) saturate(1.25);
+  box-shadow:
+    0 5px 16px rgba(0, 0, 0, 0.18),
+    inset 0 1px rgba(255, 255, 255, 0.14);
+  color: var(--foreground);
   cursor: pointer;
   font-size: 14px;
   font-weight: 650;
   text-align: center;
   text-decoration: none;
-  transition: background-color 120ms ease, transform 120ms ease;
+  transition: background-color 220ms ease, border-color 220ms ease, transform 150ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 220ms ease;
 }
 
 .primary-button:hover:not(:disabled) {
-  transform: translateY(-1px);
-  background: #c6d7ca;
+  border-color: var(--button-border-hover);
+  background: var(--button-bg-hover);
+  box-shadow:
+    0 5px 16px rgba(0, 0, 0, 0.18),
+    0 0 18px rgba(255, 255, 255, 0.12),
+    inset 0 1px rgba(255, 255, 255, 0.14);
+}
+
+.primary-button:active:not(:disabled) {
+  transform: scale(0.94);
 }
 
 .primary-button:disabled,
