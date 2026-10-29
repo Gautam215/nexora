@@ -87,9 +87,9 @@ async function registerVerifyAndLogin(email: string, name: string, password: str
   return { userId: result.data.user.id, cookie: `nexora_session=${cookie}` };
 }
 
-async function inviteAndAccept(ownerCookie: string, organizationId: string, email: string) {
+async function inviteAndAccept(ownerCookie: string, organizationId: string, email: string, role = "member") {
   const invite = await inviteOrganizationMember(
-    apiRequest(`/api/organizations/${organizationId}/members`, "POST", { email, role: "member" }, ownerCookie),
+    apiRequest(`/api/organizations/${organizationId}/members`, "POST", { email, role }, ownerCookie),
     { params: Promise.resolve({ organizationId }) },
   );
   assert.equal(invite.status, 201, await invite.clone().text());
@@ -304,6 +304,150 @@ test(
       } finally {
         await checker.end();
       }
+    } finally {
+      if (ownsSmtp) {
+        await smtp?.close();
+        smtp = undefined;
+      }
+    }
+  },
+);
+
+async function callRemovalDirectly(callerId: string, organizationId: string, targetId: string) {
+  // Calls the removal function exactly as a future route-skipping
+  // caller would: app-role connection, tenant context set with
+  // set_config, then the function. Every call runs in its own
+  // transaction that is rolled back, so successful direct calls
+  // do not disable the memberships the later cases still need.
+  const client = new Client({ connectionString });
+  await client.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      "SELECT pg_catalog.set_config('nexora.user_id', $1, true), pg_catalog.set_config('nexora.organization_id', $2, true)",
+      [callerId, organizationId],
+    );
+    const result = await client.query(
+      "SELECT tasks_unassigned, membership_disabled FROM nexora.apply_organization_member_removal($1, $2)",
+      [organizationId, targetId],
+    );
+    await client.query("ROLLBACK");
+    return {
+      ok: true as const,
+      row: result.rows[0] as { tasks_unassigned: number; membership_disabled: boolean },
+    };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    return { ok: false as const, code: (error as { code?: string }).code };
+  } finally {
+    await client.end();
+  }
+}
+
+test(
+  "organization member removal: database function enforces owner and sole-owner guards directly",
+  { skip: !connectionString || !migratorConnectionString },
+  async () => {
+    // Migration 0065 regression test: the owner-protection and
+    // last-owner rules used to live only in the removal route.
+    // These cases call the function directly, bypassing the
+    // route entirely, so a future caller cannot skip them.
+    const ownsSmtp = smtp === undefined;
+    const capture = ownsSmtp ? await startSmtpCaptureServer() : smtp;
+    assert.ok(capture);
+    smtp = capture;
+    process.env.SMTP_HOST = "127.0.0.1";
+    process.env.SMTP_PORT = String(capture.port);
+    process.env.SMTP_SECURE = "false";
+    process.env.SMTP_REQUIRE_TLS = "false";
+    process.env.SMTP_USER = "";
+    process.env.SMTP_PASSWORD = "";
+    process.env.SMTP_FROM = "noreply@nexora.example.test";
+    try {
+      const owner = await registerVerifyAndLogin(
+        `${randomUUID()}@example.test`,
+        "Direct Guard Owner",
+        "direct guard owner password",
+      );
+      const orgResponse = await createOrganization(
+        apiRequest("/api/organizations", "POST", { name: "Direct Guard Workspace", slug: `direct-guard-${owner.userId.slice(0, 8)}` }, owner.cookie),
+      );
+      assert.equal(orgResponse.status, 201);
+      const organizationId = ((await orgResponse.json()) as { data: { organization: { id: string } } }).data.organization.id;
+
+      const admin = await inviteAndAccept(owner.cookie, organizationId, `${randomUUID()}@example.test`, "admin");
+      const member = await inviteAndAccept(owner.cookie, organizationId, `${randomUUID()}@example.test`);
+      const leaver = await inviteAndAccept(owner.cookie, organizationId, `${randomUUID()}@example.test`);
+
+      // A plain member cannot remove another member, even directly.
+      const memberRemoves = await callRemovalDirectly(member.userId, organizationId, leaver.userId);
+      assert.equal(memberRemoves.ok, false);
+      if (!memberRemoves.ok) assert.equal(memberRemoves.code, "42501");
+
+      // A stranger who is not a member cannot remove anyone directly.
+      const strangerRemoves = await callRemovalDirectly(randomUUID(), organizationId, leaver.userId);
+      assert.equal(strangerRemoves.ok, false);
+      if (!strangerRemoves.ok) assert.equal(strangerRemoves.code, "42501");
+
+      // An admin cannot remove an owner directly.
+      const adminRemovesOwner = await callRemovalDirectly(admin.userId, organizationId, owner.userId);
+      assert.equal(adminRemovesOwner.ok, false);
+      if (!adminRemovesOwner.ok) assert.equal(adminRemovesOwner.code, "42501");
+
+      // A sole owner cannot leave directly.
+      const soleOwnerLeaves = await callRemovalDirectly(owner.userId, organizationId, owner.userId);
+      assert.equal(soleOwnerLeaves.ok, false);
+      if (!soleOwnerLeaves.ok) assert.equal(soleOwnerLeaves.code, "42501");
+
+      // A target who was never a member cannot be removed directly.
+      const neverMember = await callRemovalDirectly(owner.userId, organizationId, randomUUID());
+      assert.equal(neverMember.ok, false);
+      if (!neverMember.ok) assert.equal(neverMember.code, "42501");
+
+      // Owner role cannot be granted through the API (invites and
+      // role updates exclude it), so the second owner is seeded
+      // directly as the migrator, the same way the stale-token
+      // state is seeded above.
+      const secondOwner = await registerVerifyAndLogin(
+        `${randomUUID()}@example.test`,
+        "Direct Guard Second Owner",
+        "direct guard second owner password",
+      );
+      const migrator = new Client({ connectionString: migratorConnectionString });
+      await migrator.connect();
+      try {
+        await migrator.query(
+          `INSERT INTO nexora.organization_memberships
+             (organization_id, user_id, role, status, joined_at)
+           VALUES ($1, $2, 'owner', 'active', pg_catalog.now())`,
+          [organizationId, secondOwner.userId],
+        );
+      } finally {
+        await migrator.end();
+      }
+
+      // An owner cannot remove another owner directly.
+      const ownerRemovesOwner = await callRemovalDirectly(owner.userId, organizationId, secondOwner.userId);
+      assert.equal(ownerRemovesOwner.ok, false);
+      if (!ownerRemovesOwner.ok) assert.equal(ownerRemovesOwner.code, "42501");
+
+      // An owner with another active owner CAN leave directly:
+      // this is the case a blanket "owners can never be removed"
+      // guard would wrongly block, so it is asserted explicitly.
+      // The rollback inside the helper restores the membership.
+      const ownerLeaves = await callRemovalDirectly(owner.userId, organizationId, owner.userId);
+      assert.equal(ownerLeaves.ok, true);
+      if (ownerLeaves.ok) assert.equal(ownerLeaves.row.membership_disabled, true);
+
+      // An owner removing a member directly still works.
+      const ownerRemovesMember = await callRemovalDirectly(owner.userId, organizationId, member.userId);
+      assert.equal(ownerRemovesMember.ok, true);
+      if (ownerRemovesMember.ok) assert.equal(ownerRemovesMember.row.membership_disabled, true);
+
+      // A member leaving directly still works.
+      const memberLeaves = await callRemovalDirectly(leaver.userId, organizationId, leaver.userId);
+      assert.equal(memberLeaves.ok, true);
+      if (memberLeaves.ok) assert.equal(memberLeaves.row.membership_disabled, true);
     } finally {
       if (ownsSmtp) {
         await smtp?.close();

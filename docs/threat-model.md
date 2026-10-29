@@ -144,3 +144,17 @@ is never served to a user session.
   appears in code, logs, or API responses; the codebase never
   prints a credential value, and the metrics endpoint serves
   counts only.
+- **Member-removal guards (2026-10-29, migration 0065,
+  applied to production 2026-10-29):** the owner
+  and sole-owner rules for member removal now live inside
+  `apply_organization_member_removal()` as well as in the
+  removal route, so a future caller that skips the route
+  cannot remove an owner or orphan a workspace; the route's
+  403/404/409 responses are unchanged. Operator aggregates
+  (`ai_operator_aggregate`, `outbox_queue_depth`) remain
+  route-token-gated by architecture: no operator identity
+  exists in a database session (the metrics route is
+  token-gated, not session-gated), so no database-level
+  guard can check the token; their compensating controls
+  are counts-only output, PUBLIC revoked, and the live
+  per-IP rate limit plus `operator.auth_failed` logging.

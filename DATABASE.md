@@ -140,6 +140,18 @@ the model. No application code is included here.
   `id`: `audit_events.id` has no default, so 0058's insert
   failed every deletion with 23502. 0058 itself is not
   edited.
+- **Migration 0065 (2026-10-29 member-removal guards,
+  applied to production 2026-10-29, 65 migrations,
+  checksum verified):** redefines
+  `apply_organization_member_removal()` with the two business
+  rules that used to live only in the removal route: an owner
+  target is refused for anyone but a leaving owner, and a
+  sole owner leaving is refused; a target who was never a
+  member is refused too. 0056 itself is not edited. The
+  route's checks stay in place on top (defense in depth), so
+  its 403/404/409 responses are unchanged; the function is
+  now the backstop behind them. Grants are unchanged
+  (revoked from PUBLIC, granted to `nexora_app`).
 - **Migration 0064 (2026-10-28 async scan functions):**
   two SECURITY DEFINER functions, no new tables (v1 decision:
   the 7-day age cap bounds retries instead of per-file attempt
