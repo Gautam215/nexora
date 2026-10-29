@@ -3,9 +3,11 @@
   --background: #111315;
   --surface: #191c1f;
   --foreground: #f2f3f4;
+  --foreground-soft: #d8dcdd;
   --muted: #a1a6aa;
   --border: #303538;
   --accent: #a9c2b0;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", sans-serif;
 }
 
 * {
@@ -23,7 +25,7 @@ body {
     radial-gradient(ellipse at 50% 34%, rgb(72 91 79 / 15%), transparent 43%),
     var(--background);
   color: var(--foreground);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -129,16 +131,70 @@ button {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 48px clamp(24px, 5vw, 64px) 64px;
+  padding: 64px clamp(24px, 5vw, 64px) 80px;
   text-align: center;
+}
+
+.home-hero-content .eyebrow {
+  margin-bottom: 28px;
 }
 
 .home-hero-content h1 {
   max-width: 760px;
+  line-height: 1.06;
+  overflow-wrap: break-word;
 }
 
 .home-hero-content .intro-copy {
   max-width: 620px;
+  margin-top: 28px;
+  color: var(--foreground-soft);
+  line-height: 1.8;
+}
+
+/* Home hero primary action: glass pill over the photo. Scoped to the
+   hero only, so every other page keeps the solid primary button. */
+.home-hero .primary-button {
+  min-height: 52px;
+  padding: 13px 26px;
+  border: 1px solid rgb(255 255 255 / 28%);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 14%);
+  -webkit-backdrop-filter: blur(16px) saturate(1.4);
+  backdrop-filter: blur(16px) saturate(1.4);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 28%);
+  color: #ffffff;
+  font-size: 15px;
+  transition: background-color 200ms ease, border-color 200ms ease, transform 200ms ease, box-shadow 200ms ease;
+}
+
+.home-hero .primary-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgb(255 255 255 / 40%);
+  background: rgb(255 255 255 / 22%);
+  box-shadow: 0 12px 28px rgb(0 0 0 / 32%);
+}
+
+/* Home hero sign-in: plain text link, underline only on hover/focus. */
+.home-hero .home-login {
+  text-decoration: none;
+  transition: color 150ms ease;
+}
+
+.home-hero .home-login:hover {
+  color: #ffffff;
+  text-decoration: underline;
+  text-decoration-color: rgb(255 255 255 / 60%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-hero .primary-button {
+    transition: none;
+  }
+
+  .home-hero .primary-button:hover:not(:disabled) {
+    transform: none;
+  }
 }
 
 .home-below {
@@ -206,8 +262,8 @@ h1 {
 .home-actions {
   display: flex;
   align-items: center;
-  gap: 23px;
-  margin-top: 34px;
+  gap: 32px;
+  margin-top: 48px;
 }
 
 .home-login,
@@ -1427,7 +1483,7 @@ h1 {
   .home-actions {
     align-items: flex-start;
     flex-direction: column;
-    gap: 17px;
+    gap: 24px;
   }
 
   .invite-form {
