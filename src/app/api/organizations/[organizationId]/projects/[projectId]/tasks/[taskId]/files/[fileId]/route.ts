@@ -29,6 +29,7 @@ import {
 import { readObject, removeObject, writeObject } from "../../../../../../../../../../server/storage.ts";
 import { resolveOrganizationQuotaBytes } from "../../../../../../../../../../server/storage-quota.ts";
 import { scanFileForUpload } from "../../../../../../../../../../server/malware.ts";
+import { dispatchScanJob, getScanMode } from "../../../../../../../../../../server/scan-dispatch.ts";
 
 export const runtime = "nodejs";
 
@@ -117,7 +118,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
           );
           const file = lockedFile.rows[0] ?? null;
           if (!file || file.version !== claims.version) return null;
-          if (file.scan_status === "quarantined") return { file, bytes: null as Buffer | null };
+          if (file.scan_status === "quarantined") return { file, bytes: null as Buffer | null, blocked: "quarantined" as const };
           const bytes = await readObject(file.storage_key, Number(file.byte_size));
           const digest = createHash("sha256").update(bytes).digest("hex");
           if (!sameDigest(digest, file.sha256)) throw new Error("Private file integrity check failed");
@@ -126,7 +127,9 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
         "guest",
       );
       if (!authorized) return jsonError(request, 404, "FILE_NOT_FOUND", "This private file is no longer available.");
-      if (authorized.bytes === null) return jsonError(request, 409, "FILE_QUARANTINED", "This file is quarantined and cannot be downloaded.");
+      if (authorized.bytes === null) {
+        return jsonError(request, 409, "FILE_QUARANTINED", "This file is quarantined and cannot be downloaded.");
+      }
       const bytes = authorized.bytes;
       return new Response(bytes, {
         status: 200,
@@ -227,7 +230,10 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
     const storageKey = randomUUID();
     const digest = createHash("sha256").update(body.bytes).digest("hex");
     await writeObject(storageKey, body.bytes);
-    const scanStatus = await scanFileForUpload(body.bytes);
+    // Sync mode scans here, as before; async mode records pending
+    // and dispatches after the transaction commits (below).
+    const scanMode = getScanMode();
+    const scanStatus = scanMode === "sync" ? await scanFileForUpload(body.bytes) : "pending";
     let stagedStorageKey: string | null = storageKey;
     try {
       const result = await withOrganizationContext(
@@ -326,6 +332,21 @@ export async function PUT(request: NextRequest, { params }: RouteContext) {
       if (result.kind !== "replaced") return jsonError(request, 500, "INTERNAL_ERROR", "Unable to complete that request right now.");
       await removeObject(result.oldStorageKey).catch(() => undefined);
       stagedStorageKey = null;
+      // Async scan: dispatch only for a successful replace, after
+      // the transaction has committed, at the new version. A
+      // failed dispatch leaves the row pending for the daily
+      // scan-retry cron, and never fails this replace.
+      if (scanMode === "async-github-actions") {
+        await dispatchScanJob({
+          fileId: result.file.id,
+          version: result.file.version,
+          organizationId,
+          projectId,
+          taskId,
+          storageKey,
+          sha256: digest,
+        });
+      }
       return jsonOk(request, { file: result.file });
     } catch (error) {
       if (stagedStorageKey && !(error instanceof TransactionCommitOutcomeUnknown)) {

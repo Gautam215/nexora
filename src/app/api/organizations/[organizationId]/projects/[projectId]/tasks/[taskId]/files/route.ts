@@ -31,6 +31,7 @@ import {
 } from "../../../../../../../../../server/task-files.ts";
 import { removeObject, writeObject } from "../../../../../../../../../server/storage.ts";
 import { scanFileForUpload } from "../../../../../../../../../server/malware.ts";
+import { dispatchScanJob, getScanMode } from "../../../../../../../../../server/scan-dispatch.ts";
 import { resolveOrganizationQuotaBytes } from "../../../../../../../../../server/storage-quota.ts";
 
 export const runtime = "nodejs";
@@ -161,7 +162,11 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
     await writeObject(storageKey, body.bytes);
     // Scan after staging so a quarantined file still has a row
     // and bytes an operator can inspect, but is never downloadable.
-    const scanStatus = await scanFileForUpload(body.bytes);
+    // In async mode the row is recorded pending and the scan is
+    // dispatched after the transaction commits (below); in sync
+    // mode the scan runs here, as before.
+    const scanMode = getScanMode();
+    const scanStatus = scanMode === "sync" ? await scanFileForUpload(body.bytes) : "pending";
     let stagedStorageKey: string | null = storageKey;
     try {
       const result = await withOrganizationContext(
@@ -299,6 +304,22 @@ export async function POST(request: NextRequest, { params }: RouteContext) {
       if (result.kind === "organization_storage_limit") return jsonError(request, 409, "ORGANIZATION_STORAGE_LIMIT", "This workspace has reached its storage quota.");
       if (result.kind === "replayed") return jsonOk(request, { file: result.file }, result.status);
       stagedStorageKey = null;
+      // Async scan: dispatch only for a fresh insert, after the
+      // transaction has committed. A replay, a failure, or a
+      // removed staging object never dispatches; a failed dispatch
+      // leaves the row pending for the daily scan-retry cron, and
+      // never fails this upload.
+      if (scanMode === "async-github-actions" && result.kind === "created") {
+        await dispatchScanJob({
+          fileId: result.file.id,
+          version: result.file.version,
+          organizationId,
+          projectId,
+          taskId,
+          storageKey,
+          sha256: digest,
+        });
+      }
       return jsonOk(request, { file: result.file }, 201);
     } catch (error) {
       if (stagedStorageKey && !(error instanceof TransactionCommitOutcomeUnknown)) {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { createServer } from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
@@ -62,6 +63,9 @@ let smtp: SmtpCapture | undefined;
 let privateFilesRoot: string | undefined;
 let previousPrivateFileDirectory: string | undefined;
 let previousFileSigningKey: string | undefined;
+let previousScanner: string | undefined;
+let previousClamHost: string | undefined;
+let previousClamPort: string | undefined;
 
 after(async () => {
   await smtp?.close();
@@ -71,6 +75,12 @@ after(async () => {
   else process.env.NEXORA_PRIVATE_FILE_DIR = previousPrivateFileDirectory;
   if (previousFileSigningKey === undefined) delete process.env.NEXORA_FILE_SIGNING_KEY;
   else process.env.NEXORA_FILE_SIGNING_KEY = previousFileSigningKey;
+  if (previousScanner === undefined) delete process.env.NEXORA_MALWARE_SCANNER;
+  else process.env.NEXORA_MALWARE_SCANNER = previousScanner;
+  if (previousClamHost === undefined) delete process.env.NEXORA_CLAMAV_HOST;
+  else process.env.NEXORA_CLAMAV_HOST = previousClamHost;
+  if (previousClamPort === undefined) delete process.env.NEXORA_CLAMAV_PORT;
+  else process.env.NEXORA_CLAMAV_PORT = previousClamPort;
 });
 
 function apiRequest(
@@ -271,6 +281,52 @@ test(
     privateFilesRoot = await mkdtemp(path.join(os.tmpdir(), "nexora-delete-files-"));
     process.env.NEXORA_PRIVATE_FILE_DIR = privateFilesRoot;
     process.env.NEXORA_FILE_SIGNING_KEY = randomBytes(32).toString("hex");
+
+    // Pending downloads are refused (2026-10-28 ₹0 round), so this
+    // scenario's incidental file downloads run against a clean-only
+    // fake clamd; the scenario itself is about project visibility,
+    // not scan states (those are covered in
+    // task-file-scan.integration.test.ts).
+    previousScanner = process.env.NEXORA_MALWARE_SCANNER;
+    previousClamHost = process.env.NEXORA_CLAMAV_HOST;
+    previousClamPort = process.env.NEXORA_CLAMAV_PORT;
+    const clamd = createServer((socket) => {
+      let buffer = Buffer.alloc(0);
+      let headerConsumed = false;
+      socket.on("data", (chunk: Buffer) => {
+        buffer = Buffer.concat([buffer, chunk]);
+        if (!headerConsumed) {
+          if (buffer.byteLength < 10) return;
+          buffer = buffer.subarray(10);
+          headerConsumed = true;
+        }
+        for (;;) {
+          if (buffer.byteLength < 4) return;
+          const length = buffer.readUInt32BE(0);
+          if (buffer.byteLength < 4 + length) return;
+          buffer = buffer.subarray(4 + length);
+          if (length === 0) {
+            socket.end("stream: OK\n");
+            return;
+          }
+        }
+      });
+    });
+    await new Promise<void>((resolve) => clamd.listen(0, "127.0.0.1", resolve));
+    const clamdAddress = clamd.address();
+    assert.ok(clamdAddress && typeof clamdAddress !== "string");
+    process.env.NEXORA_MALWARE_SCANNER = "clamav";
+    process.env.NEXORA_CLAMAV_HOST = "127.0.0.1";
+    process.env.NEXORA_CLAMAV_PORT = String(clamdAddress.port);
+    t.after(async () => {
+      await new Promise<void>((resolve) => clamd.close(() => resolve()));
+      if (previousScanner === undefined) delete process.env.NEXORA_MALWARE_SCANNER;
+      else process.env.NEXORA_MALWARE_SCANNER = previousScanner;
+      if (previousClamHost === undefined) delete process.env.NEXORA_CLAMAV_HOST;
+      else process.env.NEXORA_CLAMAV_HOST = previousClamHost;
+      if (previousClamPort === undefined) delete process.env.NEXORA_CLAMAV_PORT;
+      else process.env.NEXORA_CLAMAV_PORT = previousClamPort;
+    });
 
     const owner = await registerVerifyAndLogin(
       `${randomUUID()}@example.test`,

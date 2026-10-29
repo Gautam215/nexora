@@ -93,7 +93,13 @@ own operating manual).
   `nexora.scheduled_job_runs`, so a repeated call replays instead
   of repeating work. The repository still schedules nothing by
   itself: the operator adds the schedule deliberately (see
-  `docs/deployment.md` §6). The file-retention/orphan cleanup
+  `docs/deployment.md` §6). Operator hardening (2026-10-28
+  security round): every cron call consumes the DB-backed
+  per-IP rate limit (scope operator-cron, 120/hour, migration
+  0063) and every failed authentication is logged as a
+  structured operator.auth_failed event (endpoint only, never
+  the token); the metrics endpoint has the same protection
+  under scope operator-metrics. The file-retention/orphan cleanup
   script (`scripts/cleanup-task-files.mjs`) remains the
   operator-run fallback for object orphans. Backup remains an
   operator script: a serverless route cannot `pg_dump` as a
@@ -411,9 +417,11 @@ The shape below is enforced by the code, not aspirational:
   rosters, and the event log (already database-shared) remains the
   only cross-instance realtime surface.
   Production WebSocket connectivity is not claimed: this is SSE
-  over HTTP, and a future WebSocket provider would replace the
-  transport while keeping the event log, versioning, and
-  authorization contract.
+  over HTTP. User decision 2026-10-28: SSE is the FINAL realtime
+  transport for this product — the PRD's "WebSocket" wording is
+  closed as the SSE implementation, not as a future migration;
+  a future transport change would need a new decision, not a
+  reinterpretation of this section.
 - **Observability:** stream connections (live/total), events
   published, and events enqueued to streams are counted in
   `src/server/metrics.ts` and reported by `GET /api/metrics`
@@ -468,6 +476,39 @@ leaves a file unchanged when the scanner is unavailable, and exits
 non-zero, rather than rewriting state it did not verify. Live
 ClamAV is not verified; the adapter is tested against a fake
 clamd only.
+
+Asynchronous mode (implemented locally 2026-10-28, not live):
+`NEXORA_MALWARE_SCANNER=github-actions` records uploads as
+`pending` and dispatches a scan job to GitHub Actions after the
+transaction commits (`src/server/scan-dispatch.ts`); the
+workflow downloads the file from a short-lived S3 presigned URL,
+scans it with `clamscan`, and reports back to
+`POST /api/internal/scan-result`, where a SECURITY DEFINER
+function (migration 0064) applies the verdict only while the row
+is still `pending` at the dispatched version — clean becomes
+clean, infected or error becomes quarantined (fail closed).
+Dispatch failure never fails the upload; the daily `scan-retry`
+cron re-dispatches pending files older than 1 hour and younger
+than 7 days. Async dispatch requires S3 storage (the local
+provider has no presigned URLs, so its files stay pending).
+Design: `docs/async-scan-github-actions-design.md`. Live
+verification (clean + EICAR) is still open; until it passes,
+malware protection must not be claimed as operational.
+
+Relay mode (implemented locally 2026-10-28, not live):
+`NEXORA_MALWARE_SCANNER=clamav-relay` scans synchronously, like
+the TCP `clamav` mode, but through a small HTTPS relay
+(`relay/server.mjs`) fronting a clamd on a VPS — the app never
+speaks plain TCP to clamd over the internet, and clamd stays on
+loopback. The relay authenticates with a bearer token, caps
+bodies at 10 MiB, and returns only a verdict; the app requires
+`https:` in production, a non-empty token, and (when set) a
+base64 PEM CA pin (`NEXORA_CLAMAV_RELAY_CA`) for self-signed
+relay certificates. Relay failure is quarantined, never clean;
+relay misconfiguration throws and fails the upload loudly.
+Setup, firewall rules, and the verification order live in
+`relay/README.md`. No migration is involved: relay mode reuses
+`scan_status` and the download gate unchanged.
 
 ## 9c. Deployment scale decision — stay single-instance (recorded default, 2026-10-28 round 4)
 

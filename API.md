@@ -158,7 +158,8 @@ response, the others fail or converge instead.
   creates no duplicate account or session, but it may issue an
   additional token, which is by design for delivery retries.
   Account deletion requires the account email as typed
-  confirmation; after success the session is revoked, so a
+  confirmation plus the current password (2026-10-28 security
+  round); after success the session is revoked, so a
   retry returns 401 and deletes nothing twice.
 - **Generate-only AI routes (no resource, no key).** AI
   planning/extraction/summarize/meeting-summary/risk/assistant generation
@@ -206,7 +207,7 @@ exist.
 | --- | --- | --- |
 | GET `/api/health` | Liveness check. Returns the process status and the database state (`up`, `unavailable`, or `unconfigured`) without secrets, versions, or database detail. Always returns 200 for a live process; the `database` field, not the status code, reports database state, so that a Neon scale-to-zero wake-up does not flap a liveness probe. | None. A health probe cannot authenticate. |
 | GET `/api/ready` | Readiness check. Returns 200 with `{ ready: true }` only when the database probe succeeds, 503 otherwise, so a load balancer can hold traffic until the process can actually serve. No detail beyond the boolean. | None. A readiness probe cannot authenticate. |
-| GET `/api/metrics` | Operator metrics: uptime, request counts by status class and normalized path, failures by operation, timed database probe latency, pool counters, realtime counters (live/total stream connections, events published, events enqueued to streams), and AI circuit-breaker openings (`ai.circuitOpens`). Paths are normalized (UUID/numeric segments become `:id`) and query strings are never recorded; no user data or credential is ever reported. Counters are process-local. "Delivered" means enqueued to a stream controller, not client-acknowledged (SSE has no acknowledgements). Fails closed with 503 when `NEXORA_METRICS_TOKEN` is unset. The `operator` block adds database-backed aggregates (migration 0061; null until that migration is applied): AI execution counts by status, prompt/completion token totals all-time and trailing 30 days, average AI latency, per-workflow counts, email-outbox rows by status (queue depth), and scheduled-job failures plus the last run per job over the trailing 7 days. | Shared token in the `x-nexora-metrics-token` header, compared in constant time. Not a user session. |
+| GET `/api/metrics` | Operator metrics: uptime, request counts by status class and normalized path, failures by operation, timed database probe latency, pool counters, realtime counters (live/total stream connections, events published, events enqueued to streams), and AI circuit-breaker openings (`ai.circuitOpens`). Paths are normalized (UUID/numeric segments become `:id`) and query strings are never recorded; no user data or credential is ever reported. Counters are process-local. "Delivered" means enqueued to a stream controller, not client-acknowledged (SSE has no acknowledgements). Fails closed with 503 when `NEXORA_METRICS_TOKEN` is unset. Every call consumes the DB-backed per-IP rate limit (scope `operator-metrics`, 120/hour, migration 0063); beyond it → 429, and a missing/invalid trusted-IP header in production → 503. Failed authentications are logged as `operator.auth_failed` events (endpoint only, never the token). The `operator` block adds database-backed aggregates (migration 0061; null until that migration is applied): AI execution counts by status, prompt/completion token totals all-time and trailing 30 days, average AI latency, per-workflow counts, email-outbox rows by status (queue depth), and scheduled-job failures plus the last run per job over the trailing 7 days. | Shared token in the `x-nexora-metrics-token` header, compared in constant time. Not a user session. |
 
 ### 2.1a AI (new in this change)
 
@@ -241,7 +242,7 @@ exist.
 | POST `/api/auth/sessions/revoke` | Revoke one own session by id. Not-found, already-revoked, expired, and another user's session all return the same 404. Revoking the current session clears its cookie. | Session |
 | POST `/api/auth/sessions/revoke-others` | Revoke all of the authenticated user's sessions except the current one, returning the count. | Session |
 | GET `/api/account/export` | Export the caller's own data across all workspaces as one JSON document: profile, workspace memberships, projects, tasks created and assigned, comments authored, file metadata (no storage key, no download link), AI execution metadata (prompts and responses are never stored), and notification counts. Rate-limited (40 per user per hour, 80 per IP per hour, scope `account-export-user`). | Session |
-| DELETE `/api/account` | Delete the caller's own account (PRD 27/28). Body `{ confirmation }` must repeat the account's email as typed confirmation; a mismatch returns 409 `ACCOUNT_EMAIL_MISMATCH`. The account is scrubbed, not hard-deleted: the user row is anonymized (email replaced by a unique `deleted-` address, display name neutralized, password replaced by a random value, status suspended, `deleted_at` stamped), every workspace membership is disabled, sessions and auth tokens are deleted, tasks assigned to the user are unassigned, and one `account.deleted` audit row is written per active workspace. A sole-owner active workspace blocks deletion with 409 `ACCOUNT_SOLE_OWNER` naming the workspace slugs; the app has no ownership-transfer route, so such a workspace must be deleted first. After success the session cookie is cleared. Rate-limited (5 per user per hour, 30 per IP per hour, scope `account-deletion-user`). | Session |
+| DELETE `/api/account` | Delete the caller's own account (PRD 27/28). Body `{ confirmation, password }` must repeat the account's email as typed confirmation AND carry the current password (destructive-action re-entry, 2026-10-28 security round); a password mismatch returns 401 `INVALID_CREDENTIALS`, an email mismatch returns 409 `ACCOUNT_EMAIL_MISMATCH`. The account is scrubbed, not hard-deleted: the user row is anonymized (email replaced by a unique `deleted-` address, display name neutralized, password replaced by a random value, status suspended, `deleted_at` stamped), every workspace membership is disabled, sessions and auth tokens are deleted, tasks assigned to the user are unassigned, and one `account.deleted` audit row is written per active workspace. A sole-owner active workspace blocks deletion with 409 `ACCOUNT_SOLE_OWNER` naming the workspace slugs; the app has no ownership-transfer route, so such a workspace must be deleted first. After success the session cookie is cleared. Rate-limited (5 per user per hour, 30 per IP per hour, scope `account-deletion-user`). | Session |
 
 **Session rotation on privilege change (approved default, 2026-10-26, migration 0039).** No periodic rotation. PATCH on an organization member revokes all of that member's sessions (count in `sessionsRevoked`, also in the `membership.updated` audit details) when the new status is not active or the new role ranks below the previous role (owner > admin > member > guest); promotion and re-enable do not revoke. PATCH on a project member revokes only when the new status is not active; a project role-only change does not revoke, because project authorization is re-checked on every request. Password change revokes all other sessions and keeps the current session; password reset revokes all sessions.
 | POST `/api/auth/verification/consume` | Consume a single-use verification token. | None (token) |
@@ -274,7 +275,7 @@ OAuth endpoints exist anymore; requests to the old paths 404.
 | POST `/api/organizations` | Create an organization; the creator becomes its owner member transactionally, with an audit record. Accepts `Idempotency-Key` (see §1.6). | Session |
 | GET `/api/organizations/{organizationId}` | Organization detail. | Session, active membership |
 | PATCH `/api/organizations/{organizationId}` | Update organization name and/or slug, with the same validation as creation, and optionally `storageQuotaBytes` (positive integer up to 1 TiB, or `null` to clear the quota). Slug conflicts return 409 `SLUG_TAKEN`; a change writes an `organization.updated` audit record with previous and new values. A save with no changes succeeds and writes no audit row. Rate-limited (40 per user per hour, 80 per IP per hour, scope `organization-settings-user`). The response includes `storage_quota_bytes` and `storage_usage_bytes` (active file bytes across the workspace); GET returns the same two fields. NULL quota means no organization cap — per-task caps (20 files, 100 MB) still apply. Uploads and replacements over the quota return 409 `ORGANIZATION_STORAGE_LIMIT`. | Session, owner or admin |
-| DELETE `/api/organizations/{organizationId}` | Soft-delete the organization (see below). Body `{ slug }` must repeat the workspace's current slug as explicit confirmation; a mismatch returns 409 `ORGANIZATION_SLUG_MISMATCH`. Writes an `organization.deleted` audit record. Rate-limited (40 per user per hour, 80 per IP per hour, scope `organization-deletion-user`). | Session, owner only |
+| DELETE `/api/organizations/{organizationId}` | Soft-delete the organization (see below). Body `{ slug, password }` must repeat the workspace's current slug as explicit confirmation AND carry the owner's current password (destructive-action re-entry, 2026-10-28 security round); a password mismatch returns 401 `INVALID_CREDENTIALS`, a slug mismatch returns 409 `ORGANIZATION_SLUG_MISMATCH`. Writes an `organization.deleted` audit record. Rate-limited (40 per user per hour, 80 per IP per hour, scope `organization-deletion-user`). | Session, owner only |
 | GET `/api/organizations/{organizationId}/usage` | Organization usage and cost tracking (PRD 40): storage bytes, active file count, and storage quota, plus per-workflow AI token usage (executions, prompt tokens, completion tokens) over succeeded executions, for all time and for the last 30 days. Read-only. | Session, owner or admin only (other members → 403 `ORGANIZATION_MANAGEMENT_REQUIRED`; non-members → 403 via the organization context). |
 | GET/POST `/api/organizations/{organizationId}/invitations` (and accept/revoke routes under `/api/invitations/`) | Create, accept, and revoke invitations. Acceptance requires an active, email-verified account matching the invited address, is single-use, and records membership and audit data transactionally. Replay is rejected. | Session; manager roles for create/revoke; invited user for accept |
 | GET `/api/organizations/{organizationId}/members`, PATCH `/api/organizations/{organizationId}/members/{userId}` | List organization members; change a member's role or status (see session rotation in 2.2). | Session, active membership; manager roles for PATCH |
@@ -408,9 +409,9 @@ Base path:
 | Method and path | Purpose |
 | --- | --- |
 | GET (collection) | Active file metadata to a project reader: file ID, safe filename, MIME type, byte size, uploader display name, scan status (`pending`, `clean`, `quarantined`), version, timestamps. Never a storage key or credential. |
-| POST (collection) | Upload raw file bytes. Requires work authorization, same origin, canonical `Content-Type`, percent-encoded `X-File-Name`, and an `Idempotency-Key`. Streams at most 10 MiB, then validates extension, declared MIME, and file signature/content before storing. At most 20 active files and 100 MiB per task. When a malware scanner is configured, the upload is scanned synchronously and recorded as `clean` or `quarantined` (infected, or scanner unavailable — fail closed); with no scanner configured it is recorded as `pending` (not scanned, never clean). |
-| GET `/api/organizations/{organizationId}/projects/{projectId}/tasks/{taskId}/files/{fileId}` (no token) | Issues a five-minute relative signed URL to a project reader. Refused with 409 `FILE_QUARANTINED` for a quarantined file. |
-| GET (signed URL) | Returns the file as a download attachment. The HMAC claim binds organization, project, task, file, version, and original user; download rechecks membership, project access, file version and state, and SHA-256 integrity. Rate-limited. Refused with 409 `FILE_QUARANTINED` for a quarantined file. |
+| POST (collection) | Upload raw file bytes. Requires work authorization, same origin, canonical `Content-Type`, percent-encoded `X-File-Name`, and an `Idempotency-Key`. Streams at most 10 MiB, then validates extension, declared MIME, and file signature/content before storing. At most 20 active files and 100 MiB per task. When a malware scanner is configured, the upload is scanned synchronously and recorded as `clean` or `quarantined` (infected, or scanner unavailable — fail closed); with no scanner configured it is recorded as `pending` (not scanned, never clean). In async mode (`NEXORA_MALWARE_SCANNER=github-actions`) the upload is recorded as `pending` and a scan job is dispatched to GitHub Actions after the transaction commits; the verdict arrives later via the scan-result callback (§4) and moves the row to `clean` or `quarantined`. An idempotency replay never re-dispatches. In relay mode (`NEXORA_MALWARE_SCANNER=clamav-relay`) the upload is scanned synchronously through the HTTPS relay and recorded `clean` or `quarantined` exactly like the TCP clamd mode. |
+| GET `/api/organizations/{organizationId}/projects/{projectId}/tasks/{taskId}/files/{fileId}` (no token) | Issues a five-minute relative signed URL to a project reader. Refused with 409 `FILE_QUARANTINED` for a quarantined file, 409 `FILE_SCAN_PENDING` for a pending (unscanned) file. |
+| GET (signed URL) | Returns the file as a download attachment. The HMAC claim binds organization, project, task, file, version, and original user; download rechecks membership, project access, file version and state, and SHA-256 integrity. Rate-limited. Refused with 409 `FILE_QUARANTINED` for a quarantined file, 409 `FILE_SCAN_PENDING` for a pending file. |
 | PUT `/api/organizations/{organizationId}/projects/{projectId}/tasks/{taskId}/files/{fileId}` | Replaces content and metadata. Requires work authorization, same origin, and `If-Match` with the current version. Stale version returns 409; success increments the version and invalidates older signed links. |
 | DELETE `/api/organizations/{organizationId}/projects/{projectId}/tasks/{taskId}/files/{fileId}` | Soft-deletes immediately, revokes links. Purge after 30 days is by the operator-run cleanup command, not by this route. |
 
@@ -418,7 +419,7 @@ Base path:
 
 | Method and path | Purpose | Auth |
 | --- | --- | --- |
-| GET `/api/cron/{job}` | Run one scheduled job: `due-date` (reminders for tasks due tomorrow), `cleanup` (expired-record purge + file-object removal), `email-outbox` (one notification-email worker batch), `alerts` (metrics alerting on the SMTP path), `healing` (bounded auto-healing: purge expired sessions; disabled entirely by `NEXORA_HEALING_DISABLED=1`). A second call the same day replays the first run's result; a failed run can be retried the same day. | `x-nexora-cron-token` header OR `Authorization: Bearer` with the same token (the form Vercel Cron sends when `CRON_SECRET` equals `NEXORA_CRON_TOKEN`); `NEXORA_CRON_TOKEN` env; unset token → 503, wrong token → 401, unknown job → 404. The origin check does not apply (cron callers are not browsers). Schedule lives in `vercel.json` (daily on Hobby; see `docs/deployment.md` §6a). |
+| GET `/api/cron/{job}` | Run one scheduled job: `due-date` (reminders for tasks due tomorrow), `cleanup` (expired-record purge + file-object removal), `email-outbox` (one notification-email worker batch), `alerts` (metrics alerting on the SMTP path), `healing` (bounded auto-healing: purge expired sessions; disabled entirely by `NEXORA_HEALING_DISABLED=1`), `scan-retry` (re-dispatch async scan jobs for active pending files older than 1 hour and younger than 7 days, capped at 50 per run; migration 0064). A second call the same day replays the first run's result; a failed run can be retried the same day. | `x-nexora-cron-token` header OR `Authorization: Bearer` with the same token (the form Vercel Cron sends when `CRON_SECRET` equals `NEXORA_CRON_TOKEN`); `NEXORA_CRON_TOKEN` env; unset token → 503, wrong token → 401, unknown job → 404. Every call consumes the DB-backed per-IP rate limit (scope `operator-cron`, 120/hour, migration 0063); beyond it → 429, and a missing/invalid trusted-IP header in production → 503. Failed authentications are logged as `operator.auth_failed` events (endpoint only, never the token). The origin check does not apply (cron callers are not browsers). Schedule lives in `vercel.json` (daily on Hobby; see `docs/deployment.md` §6a). |
 
 Alerts: server-error total crossing a new multiple of
 `NEXORA_ALERT_SERVER_ERROR_THRESHOLD` (default 10) since the last
@@ -440,11 +441,32 @@ blank means no cap, as before.
 
 ## 4. Webhooks
 
-There are no inbound or outbound webhooks today. When one is added, it
-must: verify its signature server-side before any business logic, use an
-idempotency key to make redelivery safe, validate its payload with a Zod
-schema, log only safe metadata, and fail closed on a missing or invalid
-signature. No webhook may trust a caller-supplied tenant, role, or user ID.
+One inbound webhook exists: the scan-result callback for async
+malware scanning (design:
+`docs/async-scan-github-actions-design.md`). It follows the
+rules this section used to state for a future webhook:
+authentication is a shared secret (`x-nexora-scan-secret`
+header, timing-safe compare) verified before any business
+logic; the payload is validated with a Zod schema
+(`scanCallbackSchema`: file ID, positive version, outcome
+`clean` | `infected` | `error`, run ID); redelivery is safe
+because the SECURITY DEFINER function (migration 0064)
+applies a verdict only while the row is still `pending` at
+the dispatched version, so a duplicate or stale delivery is a
+no-op; only safe metadata is logged; a missing secret fails
+closed with 503 and a wrong secret with 401; and no
+caller-supplied tenant, role, or user ID is trusted (the
+callback carries no tenant claim at all — the function looks
+the row up by file ID and version). There is no IP rate limit
+on this endpoint in v1 (GitHub egress IPs vary); the secret
+plus the pending-only transition are the controls. The
+endpoint always answers 200 after authentication, whether
+applied or ignored; a 500 means the verdict could not be
+recorded at all.
+
+| Method and path | Purpose | Auth |
+| --- | --- | --- |
+| POST `/api/internal/scan-result` | Apply one async scan verdict: `clean` → `clean`, `infected` or `error` → `quarantined` (fail closed), only for an active row still `pending` at the dispatched version. The origin check does not apply (the caller is a GitHub Actions runner, not a browser). | `x-nexora-scan-secret` header with `NEXORA_SCAN_WEBHOOK_SECRET`; unset secret → 503, wrong secret → 401, invalid payload → 400. |
 
 ## 5. Rate limiting
 
@@ -474,6 +496,10 @@ signature. No webhook may trust a caller-supplied tenant, role, or user ID.
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_REQUIRE_TLS`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | Outbound email. `SMTP_PASSWORD` is a secret and is never logged. |
 | `NEXORA_TRUSTED_CLIENT_IP_HEADER` | Production trusted-ingress IP header. Blank in local development. |
 | `NEXORA_CRON_TOKEN` | Long random value for `GET /api/cron/{job}`. Blank means every cron call fails closed with 503. |
+| `NEXORA_MALWARE_SCANNER` | Scan mode: `clamav` (synchronous clamd scan), `clamav-relay` (synchronous scan via the HTTPS relay; needs `NEXORA_CLAMAV_RELAY_URL` — `https:` in production — plus `NEXORA_CLAMAV_RELAY_TOKEN`, and optionally `NEXORA_CLAMAV_RELAY_CA` for a pinned private CA), `github-actions` (async GitHub Actions scan; needs `NEXORA_GITHUB_DISPATCH_TOKEN` for dispatch and `NEXORA_SCAN_WEBHOOK_SECRET` for the callback), blank/`none` (no scanning; uploads stay `pending`). Any other value fails uploads with a configuration error. |
+| `NEXORA_GITHUB_DISPATCH_TOKEN` | GitHub token able to send repository dispatches for async scanning. Blank means dispatch is skipped (uploads still succeed, rows stay `pending` for the retry cron). Never logged. |
+| `NEXORA_SCAN_WEBHOOK_SECRET` | Shared secret for `POST /api/internal/scan-result`, at least 32 random bytes, server-only; the same value is stored as a GitHub Actions secret. Blank means every callback fails closed with 503. |
+| `NEXORA_SCAN_REPO` | Repository dispatched to for async scanning (default `Gautam215/nexora`). |
 | `CRON_SECRET` | Must equal `NEXORA_CRON_TOKEN`. Vercel Cron sends it as `Authorization: Bearer <CRON_SECRET>`; a mismatch makes every Vercel Cron call 401. |
 | `NEXORA_ALERT_EMAIL`, `NEXORA_ALERT_SERVER_ERROR_THRESHOLD` | Alert recipient (blank = disabled) and server-error threshold (default 10). |
 | `NEXORA_DEFAULT_STORAGE_QUOTA_BYTES` | Opt-in default quota for organizations with no explicit quota. Blank = no cap. |

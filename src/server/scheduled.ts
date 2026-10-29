@@ -6,6 +6,7 @@ import { sendNotificationEmail } from "./email.ts";
 import { snapshotMetrics } from "./metrics.ts";
 import { processNotificationEmailBatch } from "./notifications/email-outbox.ts";
 import { removeObject } from "./storage.ts";
+import { dispatchScanJob } from "./scan-dispatch.ts";
 import {
   evaluateDatabaseDownAlert,
   evaluateServerErrorAlert,
@@ -31,7 +32,7 @@ import {
 // reminders or purging twice. A failed run does NOT block a retry:
 // the claim is replaced, so an operator can rerun a failed day.
 
-export const SCHEDULED_JOBS = ["due-date", "cleanup", "email-outbox", "alerts", "healing"] as const;
+export const SCHEDULED_JOBS = ["due-date", "cleanup", "email-outbox", "alerts", "healing", "scan-retry"] as const;
 export type ScheduledJob = (typeof SCHEDULED_JOBS)[number];
 
 export class CronConfigurationError extends Error {
@@ -354,6 +355,46 @@ async function runAlertsJob(): Promise<string> {
     : `no alerts triggered (server errors ${snapshot.requests.serverError}, database up: ${databaseUp})`;
 }
 
+// Scan-retry job (async GitHub Actions scanning, migration
+// 0064). Re-dispatches active pending files older than 1 hour
+// and younger than 7 days, oldest first, capped at 50 per run
+// by the database function. Re-dispatching a file whose
+// callback is merely slow is safe: the callback's pending-only,
+// version-pinned transition makes the second delivery a no-op.
+// A failed dispatch leaves the row pending for the next daily
+// run; rows older than 7 days are left for the operator, never
+// silently cleaned. Like the other jobs, this one is token-gated
+// by the cron route and claims one run per day.
+async function runScanRetryJob(): Promise<string> {
+  const pool = getScheduledPool();
+  const stale = await pool.query<{
+    file_id: string;
+    version: number;
+    storage_key: string;
+    sha256: string;
+    organization_id: string;
+    project_id: string;
+    task_id: string;
+  }>(`SELECT file_id, version, storage_key, sha256, organization_id, project_id, task_id
+     FROM nexora.list_stale_pending_files()`);
+  let dispatched = 0;
+  let failed = 0;
+  for (const row of stale.rows) {
+    const result = await dispatchScanJob({
+      fileId: row.file_id,
+      version: row.version,
+      organizationId: row.organization_id,
+      projectId: row.project_id,
+      taskId: row.task_id,
+      storageKey: row.storage_key,
+      sha256: row.sha256,
+    });
+    if (result.dispatched) dispatched += 1;
+    else failed += 1;
+  }
+  return `scan-retry: ${stale.rows.length} stale pending, dispatched ${dispatched}, failed ${failed}`;
+}
+
 export async function runScheduledJob(job: ScheduledJob): Promise<{ replay: boolean; detail: string }> {
   const claim = await claimJobRun(job);
   if (claim.replay) return { replay: true, detail: claim.previousDetail };
@@ -365,6 +406,7 @@ export async function runScheduledJob(job: ScheduledJob): Promise<{ replay: bool
       const result = await processNotificationEmailBatch(20);
       detail = `claimed ${result.claimed}, sent ${result.sent}, failed ${result.failed}, pending retry ${result.pendingRetry}`;
     } else if (job === "healing") detail = await runHealingJob();
+    else if (job === "scan-retry") detail = await runScanRetryJob();
     else detail = await runAlertsJob();
     await finishJobRun(claim.id, "ok", detail);
     return { replay: false, detail };

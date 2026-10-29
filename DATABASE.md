@@ -140,6 +140,28 @@ the model. No application code is included here.
   `id`: `audit_events.id` has no default, so 0058's insert
   failed every deletion with 23502. 0058 itself is not
   edited.
+- **Migration 0064 (2026-10-28 async scan functions):**
+  two SECURITY DEFINER functions, no new tables (v1 decision:
+  the 7-day age cap bounds retries instead of per-file attempt
+  counts). `apply_scan_result(file, version, outcome)` moves a
+  row only while it is active, still `pending`, and still at
+  the dispatched version — `clean` becomes clean, `infected`
+  or `error` becomes quarantined (fail closed); every other
+  call is a no-op returning false, so duplicate, stale, or
+  deleted-file callbacks cannot move a row twice or across
+  versions. The version is not bumped (scan completion is not
+  a content change). `list_stale_pending_files()` returns
+  active pending rows older than 1 hour and younger than 7
+  days, capped at 50, oldest first, for the daily scan-retry
+  cron. Both functions are granted to `nexora_app`.
+- **Migration 0063 (2026-10-28 operator rate-limit
+  scopes):** adds `operator-cron` and `operator-metrics` to
+  the `auth_rate_limits` scope CHECK and to the
+  `consume_auth_rate_limit` allowlist, following the 0057
+  pattern exactly (function body otherwise byte-identical).
+  These scopes back the per-IP 120/hour limits on the cron
+  and metrics token endpoints. Applied to production
+  2026-10-28 14:04 IST (63 migrations, checksum verified).
 - **Migration 0062 (2026-10-28 milestone trigger,
   correction):** redefines
   `guard_milestone_task_consistency()` identically to 0008.

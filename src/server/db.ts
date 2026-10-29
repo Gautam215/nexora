@@ -212,6 +212,25 @@ export async function closeDatabasePool(): Promise<void> {
   await pool.end();
 }
 
+// Scan-result application for the token-gated
+// /api/internal/scan-result endpoint (async GitHub Actions
+// scanning, migration 0064). The SECURITY DEFINER function owns
+// the pending-only, version-pinned transition; this helper only
+// calls it. Returns false when the callback was stale,
+// duplicate, or for a deleted file — never an error, because a
+// stale callback is an expected race, not a failure.
+export async function applyScanResult(
+  fileId: string,
+  version: number,
+  outcome: "clean" | "infected" | "error",
+): Promise<boolean> {
+  const result = await getPool().query<{ apply_scan_result: boolean }>(
+    "SELECT nexora.apply_scan_result($1, $2, $3) AS apply_scan_result",
+    [fileId, version, outcome],
+  );
+  return result.rows[0]?.apply_scan_result ?? false;
+}
+
 async function inTransaction<T>(work: (client: PoolClient) => Promise<T>): Promise<T> {
   const client = await getPool().connect();
   let transactionStarted = false;
