@@ -119,6 +119,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
           const file = lockedFile.rows[0] ?? null;
           if (!file || file.version !== claims.version) return null;
           if (file.scan_status === "quarantined") return { file, bytes: null as Buffer | null, blocked: "quarantined" as const };
+          if (file.scan_status === "pending") return { file, bytes: null as Buffer | null, blocked: "pending" as const };
           const bytes = await readObject(file.storage_key, Number(file.byte_size));
           const digest = createHash("sha256").update(bytes).digest("hex");
           if (!sameDigest(digest, file.sha256)) throw new Error("Private file integrity check failed");
@@ -128,7 +129,9 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
       );
       if (!authorized) return jsonError(request, 404, "FILE_NOT_FOUND", "This private file is no longer available.");
       if (authorized.bytes === null) {
-        return jsonError(request, 409, "FILE_QUARANTINED", "This file is quarantined and cannot be downloaded.");
+        return authorized.blocked === "pending"
+          ? jsonError(request, 409, "FILE_SCAN_PENDING", "This file has not passed malware scanning yet and cannot be downloaded.")
+          : jsonError(request, 409, "FILE_QUARANTINED", "This file is quarantined and cannot be downloaded.");
       }
       const bytes = authorized.bytes;
       return new Response(bytes, {
@@ -164,6 +167,7 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     );
     if (!result) return jsonError(request, 404, "FILE_NOT_FOUND", "File not found.");
     if (result.scan_status === "quarantined") return jsonError(request, 409, "FILE_QUARANTINED", "This file is quarantined and cannot be downloaded.");
+    if (result.scan_status === "pending") return jsonError(request, 409, "FILE_SCAN_PENDING", "This file has not passed malware scanning yet and cannot be downloaded.");
 
     const expiresAt = Math.floor(Date.now() / 1000) + PRIVATE_FILE_LINK_TTL_SECONDS;
     const signedToken = createPrivateFileToken({

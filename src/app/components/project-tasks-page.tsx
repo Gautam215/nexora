@@ -91,6 +91,7 @@ interface TaskFile {
   mime_type: string;
   byte_size: number;
   uploaded_by_name: string | null;
+  scan_status: "pending" | "clean" | "quarantined";
   version: number;
   created_at: string;
   updated_at: string;
@@ -1293,11 +1294,20 @@ function TaskFilesPanel({ collectionUrl, canEdit, open }: {
               <div className="task-file-info">
                 <strong>{file.original_filename}</strong>
                 <small>{formatFileSize(file.byte_size)} · {file.uploaded_by_name || "Project member"} · {formatDateTime(file.created_at)}</small>
+                {file.scan_status === "pending" && (
+                  <small className="task-file-scan-warning">Scan pending — this file has not been malware-checked.</small>
+                )}
               </div>
               <div className="task-file-actions">
-                <button type="button" className="quiet-button" onClick={() => void downloadFile(file)} disabled={Boolean(pending)}>
-                  {pending === `download:${file.id}` ? "Preparing..." : "Download"}
-                </button>
+                {file.scan_status === "pending" ? (
+                  <small className="task-file-scan-warning">Download unavailable until this file passes malware scanning.</small>
+                ) : file.scan_status === "quarantined" ? (
+                  <small className="task-file-scan-warning">This file is quarantined and cannot be downloaded.</small>
+                ) : (
+                  <button type="button" className="quiet-button" onClick={() => void downloadFile(file)} disabled={Boolean(pending)}>
+                    {pending === `download:${file.id}` ? "Preparing..." : "Download"}
+                  </button>
+                )}
                 {canEdit && (
                   <>
                     <label className="quiet-button task-file-replace" aria-label={`Replace ${file.original_filename}`}>

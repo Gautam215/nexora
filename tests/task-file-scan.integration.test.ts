@@ -14,6 +14,7 @@ import { POST as createProject } from "../src/app/api/organizations/[organizatio
 import { POST as createTask } from "../src/app/api/organizations/[organizationId]/projects/[projectId]/tasks/route.ts";
 import { POST as uploadTaskFile } from "../src/app/api/organizations/[organizationId]/projects/[projectId]/tasks/[taskId]/files/route.ts";
 import { GET as getTaskFile } from "../src/app/api/organizations/[organizationId]/projects/[projectId]/tasks/[taskId]/files/[fileId]/route.ts";
+import { createPrivateFileToken } from "../src/security/private-files.ts";
 import { closeDatabasePool } from "../src/server/db.ts";
 import { startSmtpCaptureServer, type SmtpCapture } from "./smtp-server.ts";
 
@@ -225,6 +226,115 @@ test(
       assert.equal(await download.text(), "clean content\n");
     } finally {
       await new Promise<void>((resolve) => clamd.close(() => resolve()));
+    }
+  },
+);
+
+test(
+  "pending files cannot be downloaded (link or signed token), and a failed scan quarantines",
+  { skip: !connectionString },
+  async () => {
+    // No second capture server: the email transporter is cached
+    // module-level, so a second server would receive nothing. This
+    // test reuses the first test's server (module `smtp`, still
+    // open until the file-level after() hook) via the shared
+    // registerVerifyAndLogin helper, and only overrides the
+    // private-file / scanner env.
+    const savedEnv: Record<string, string | undefined> = {};
+    for (const key of ["NEXORA_PRIVATE_FILE_DIR", "NEXORA_FILE_SIGNING_KEY", "NEXORA_MALWARE_SCANNER", "NEXORA_CLAMAV_HOST", "NEXORA_CLAMAV_PORT"]) {
+      savedEnv[key] = process.env[key];
+    }
+    const signingKey = randomBytes(32).toString("hex");
+    const localRoot = await mkdtemp(path.join(os.tmpdir(), "nexora-pending-files-"));
+    process.env.NEXORA_PRIVATE_FILE_DIR = localRoot;
+    process.env.NEXORA_FILE_SIGNING_KEY = signingKey;
+    try {
+      const owner = await registerVerifyAndLogin(`${randomUUID()}@example.test`, "Pending Owner", "pending owner password");
+      const orgResponse = await createOrganization(
+        apiRequest("/api/organizations", "POST", { name: "Pending Workspace", slug: `pending-${owner.userId.slice(0, 8)}` }, owner.cookie),
+      );
+      assert.equal(orgResponse.status, 201);
+      const organizationId = ((await orgResponse.json()) as { data: { organization: { id: string } } }).data.organization.id;
+      const projectResponse = await createProject(
+        apiRequest(`/api/organizations/${organizationId}/projects`, "POST", { name: "Pending project" }, owner.cookie),
+        { params: Promise.resolve({ organizationId }) },
+      );
+      assert.equal(projectResponse.status, 201);
+      const projectId = ((await projectResponse.json()) as { data: { project: { id: string } } }).data.project.id;
+      const taskResponse = await createTask(
+        apiRequest(`/api/organizations/${organizationId}/projects/${projectId}/tasks`, "POST", { title: "Pending task" }, owner.cookie, { "idempotency-key": "pending-task-001" }),
+        { params: Promise.resolve({ organizationId, projectId }) },
+      );
+      assert.equal(taskResponse.status, 201, await taskResponse.clone().text());
+      const taskId = ((await taskResponse.json()) as { data: { task: { id: string } } }).data.task.id;
+      const filePath = `/api/organizations/${organizationId}/projects/${projectId}/tasks/${taskId}/files`;
+      const fileParams = { params: Promise.resolve({ organizationId, projectId, taskId }) };
+      const fileUrl = (fileId: string) =>
+        `/api/organizations/${organizationId}/projects/${projectId}/tasks/${taskId}/files/${fileId}`;
+
+      // Scanner unset: upload is recorded pending, never clean.
+      delete process.env.NEXORA_MALWARE_SCANNER;
+      const pendingUpload = await uploadTaskFile(
+        privateFileRequest(filePath, Buffer.from("pending content\n"), "pending.txt", owner.cookie, { "idempotency-key": "pending-file-001" }),
+        fileParams,
+      );
+      assert.equal(pendingUpload.status, 201, await pendingUpload.clone().text());
+      const pendingBody = (await pendingUpload.json()) as { data: { file: { id: string; scan_status: string; version: number } } };
+      assert.equal(pendingBody.data.file.scan_status, "pending");
+      const pendingFileId = pendingBody.data.file.id;
+      assert.equal(typeof pendingBody.data.file.version, "number");
+
+      // Signed-link creation for a pending file is refused.
+      const pendingLink = await getTaskFile(
+        apiRequest(fileUrl(pendingFileId), "GET", undefined, owner.cookie),
+        { params: Promise.resolve({ organizationId, projectId, taskId, fileId: pendingFileId }) },
+      );
+      assert.equal(pendingLink.status, 409);
+      assert.equal(((await pendingLink.json()) as { error: { code: string } }).error.code, "FILE_SCAN_PENDING");
+
+      // A signed token crafted for the pending file is refused too:
+      // the token path must not be a bypass around the link path.
+      const craftedToken = createPrivateFileToken(
+        { organizationId, projectId, taskId, fileId: pendingFileId, userId: owner.userId, version: pendingBody.data.file.version, expiresAt: Math.floor(Date.now() / 1000) + 300 },
+        signingKey,
+      );
+      const pendingDownload = await getTaskFile(
+        apiRequest(`${fileUrl(pendingFileId)}?token=${encodeURIComponent(craftedToken)}`, "GET", undefined, owner.cookie),
+        { params: Promise.resolve({ organizationId, projectId, taskId, fileId: pendingFileId }) },
+      );
+      assert.equal(pendingDownload.status, 409);
+      assert.equal(((await pendingDownload.json()) as { error: { code: string } }).error.code, "FILE_SCAN_PENDING");
+
+      // Failed scan (scanner configured, daemon unreachable) fails
+      // closed: the file is quarantined, not pending, not clean.
+      const probe = createServer();
+      await new Promise<void>((resolve) => probe.listen(0, "127.0.0.1", resolve));
+      const probeAddress = probe.address();
+      assert.ok(probeAddress && typeof probeAddress !== "string");
+      const closedPort = probeAddress.port;
+      await new Promise<void>((resolve) => probe.close(() => resolve()));
+      process.env.NEXORA_MALWARE_SCANNER = "clamav";
+      process.env.NEXORA_CLAMAV_HOST = "127.0.0.1";
+      process.env.NEXORA_CLAMAV_PORT = String(closedPort);
+      const failedUpload = await uploadTaskFile(
+        privateFileRequest(filePath, Buffer.from("unscannable content\n"), "failed.txt", owner.cookie, { "idempotency-key": "pending-file-002" }),
+        fileParams,
+      );
+      assert.equal(failedUpload.status, 201, await failedUpload.clone().text());
+      const failedBody = (await failedUpload.json()) as { data: { file: { id: string; scan_status: string } } };
+      assert.equal(failedBody.data.file.scan_status, "quarantined");
+      const failedLink = await getTaskFile(
+        apiRequest(fileUrl(failedBody.data.file.id), "GET", undefined, owner.cookie),
+        { params: Promise.resolve({ organizationId, projectId, taskId, fileId: failedBody.data.file.id }) },
+      );
+      assert.equal(failedLink.status, 409);
+      assert.equal(((await failedLink.json()) as { error: { code: string } }).error.code, "FILE_QUARANTINED");
+    } finally {
+      await rm(localRoot, { recursive: true, force: true });
+      for (const [key, value] of Object.entries(savedEnv)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
     }
   },
 );
