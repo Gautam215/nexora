@@ -1,12 +1,17 @@
 :root {
   color-scheme: dark;
-  --background: #090b10;
+  --background: #050711;
   --surface: #191c1f;
   --foreground: #f2f3f4;
   --foreground-soft: #d8dcdd;
   --muted: #a1a6aa;
   --border: #303538;
   --accent: #a9c2b0;
+  --box-bg: rgba(16, 21, 30, 0.55);
+  --box-bg-hover: rgba(16, 21, 30, 0.7);
+  --box-border: rgba(255, 255, 255, 0.1);
+  --box-border-hover: rgba(255, 255, 255, 0.2);
+  --box-shadow: 0 28px 90px rgba(0, 0, 0, 0.32);
   --font-sans: var(--font-inter), -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
   --font-display: var(--font-inter), -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
   --font-mono: var(--font-plex-mono), monospace;
@@ -31,6 +36,50 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+}
+
+/* Reelscape profile background layers, on every page: blue glow, faint
+   grid, then the cursor wave canvas, then page content. */
+body::before {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  content: "";
+  background:
+    radial-gradient(circle at 50% 10%, rgba(107, 132, 255, 0.12), transparent 34%),
+    linear-gradient(180deg, rgba(2, 4, 13, 0.2), rgba(3, 5, 13, 0.72));
+}
+
+body::after {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  content: "";
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
+  background-size: 44px 44px;
+  -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.8), transparent 84%);
+  mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.8), transparent 84%);
+  opacity: 0.35;
+}
+
+.liquid-wave-background {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0.9;
+  mix-blend-mode: screen;
+}
+
+.nexora-page-content {
+  position: relative;
+  z-index: 1;
 }
 
 button,
@@ -271,8 +320,7 @@ h1 {
   min-height: 100svh;
   grid-template-columns: minmax(0, 1fr) minmax(420px, 0.82fr);
   background:
-    radial-gradient(ellipse at 29% 49%, rgb(72 91 79 / 17%), transparent 45%),
-    var(--background);
+    radial-gradient(ellipse at 29% 49%, rgb(72 91 79 / 17%), transparent 45%);
 }
 
 .auth-story {
@@ -353,10 +401,12 @@ h1 {
   width: min(100%, 450px);
   margin: auto;
   padding: clamp(27px, 4vw, 44px);
-  border: 1px solid #2b3130;
+  border: 1px solid var(--box-border);
   border-radius: 18px;
-  background: linear-gradient(145deg, rgb(28 32 31 / 97%), rgb(21 24 24 / 97%));
-  box-shadow: 0 28px 80px rgb(0 0 0 / 19%);
+  background: var(--box-bg);
+  -webkit-backdrop-filter: blur(24px);
+  backdrop-filter: blur(24px);
+  box-shadow: var(--box-shadow);
 }
 
 .workspace-card {
@@ -465,9 +515,11 @@ h1 {
 .confirm-panel {
   width: 100%;
   padding: 13px 14px;
-  border: 1px solid #3a4240;
+  border: 1px solid var(--box-border);
   border-radius: 10px;
-  background: #131615;
+  background: var(--box-bg);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
 }
 
 .confirm-panel p {
@@ -701,9 +753,11 @@ h1 {
   align-items: center;
   gap: 12px;
   padding: 14px;
-  border: 1px solid #333b37;
+  border: 1px solid var(--box-border);
   border-radius: 10px;
-  background: #171b19;
+  background: var(--box-bg);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
 }
 
 .organization-monogram,
@@ -785,8 +839,8 @@ h1 {
 
 .organization-card-link:hover {
   transform: translateY(-1px);
-  border-color: #53665a;
-  background: #1b211d;
+  border-color: var(--box-border-hover);
+  background: var(--box-bg-hover);
 }
 
 .organization-dashboard .secondary-link {
@@ -835,9 +889,11 @@ h1 {
   gap: 12px;
   margin: 26px 0 19px;
   padding: 15px;
-  border: 1px solid #354139;
+  border: 1px solid var(--box-border);
   border-radius: 10px;
-  background: #171d19;
+  background: var(--box-bg);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
 }
 
 .workspace-status-card .status-indicator {
@@ -972,9 +1028,11 @@ h1 {
   align-items: center;
   gap: 13px;
   padding: 13px;
-  border: 1px solid #333b37;
+  border: 1px solid var(--box-border);
   border-radius: 10px;
-  background: #171b19;
+  background: var(--box-bg);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
   color: inherit;
   text-decoration: none;
   transition: border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
@@ -982,8 +1040,8 @@ h1 {
 
 .project-card:hover {
   transform: translateY(-1px);
-  border-color: #53665a;
-  background: #1b211d;
+  border-color: var(--box-border-hover);
+  background: var(--box-bg-hover);
 }
 
 .project-icon {
@@ -2085,9 +2143,11 @@ h1 {
 .analytics-panel {
   min-width: 0;
   padding: 13px;
-  border: 1px solid #303833;
+  border: 1px solid var(--box-border);
   border-radius: 9px;
-  background: #141816;
+  background: var(--box-bg);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
 }
 
 .analytics-panel-heading {
@@ -2386,9 +2446,11 @@ h1 {
 .milestone-card {
   min-width: 0;
   padding: 15px;
-  border: 1px solid #333b37;
+  border: 1px solid var(--box-border);
   border-radius: 10px;
-  background: linear-gradient(145deg, #191e1b, #171b19);
+  background: var(--box-bg);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
 }
 
 .milestone-card-heading,
@@ -2809,9 +2871,11 @@ h1 {
 .task-card {
   min-width: 0;
   padding: 11px;
-  border: 1px solid #354039;
+  border: 1px solid var(--box-border);
   border-radius: 9px;
-  background: #1d2320;
+  background: var(--box-bg);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
   box-shadow: 0 5px 17px rgb(0 0 0 / 10%);
 }
 

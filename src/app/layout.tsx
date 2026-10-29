@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { IBM_Plex_Mono, Inter } from "next/font/google";
 import { connection } from "next/server";
 import type { ReactNode } from "react";
+import { LiquidWaveBackground } from "./components/liquid-wave-background";
 import "./globals.css";
 
 const inter = Inter({
@@ -28,7 +29,10 @@ export default async function RootLayout({
 
   return (
     <html lang="en">
-      <body className={`${inter.variable} ${plexMono.variable}`}>{children}</body>
+      <body className={`${inter.variable} ${plexMono.variable}`}>
+        <LiquidWaveBackground />
+        <div className="nexora-page-content">{children}</div>
+      </body>
     </html>
   );
 }
