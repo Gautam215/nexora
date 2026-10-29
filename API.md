@@ -1,9 +1,9 @@
 # Nexora — API
 
-This document defines how Nexora communicates internally and with external
-services. It covers the shipped API routes (33 route files), the conventions
-every route follows, and the external integrations that exist today. It does
-not invent endpoints that do not exist, and it does not describe AI or
+This is my note on how Nexora talks to itself and to outside services.
+It lists the routes that actually ship (33 route files), the rules every
+route follows, and the outside integrations that exist right now. It
+doesn't make up endpoints that aren't there, and it doesn't describe AI or
 realtime endpoints, which are future work.
 
 ## 1. Conventions
@@ -82,10 +82,10 @@ error name, validated database code).
 
 ### 1.6 Idempotency and safe retry
 
-Every mutation falls in exactly one of the retry classes below.
-A retry is "safe" when it cannot create a duplicate resource or
-apply an effect twice; only the key class replays the original
-response, the others fail or converge instead.
+Every mutation sits in exactly one of the retry classes below. Look,
+a retry counts as "safe" when it can't make a second copy of something
+or run an effect twice. Only the key class plays back the original
+response. The rest fail or settle on the same end state instead.
 
 - **Idempotency-key creation (replay).** Organization, project,
   task, milestone, comment, and file-upload creation accept an
@@ -179,27 +179,28 @@ response, the others fail or converge instead.
 
 ### 1.7 API evolution
 
-- Changes to this API are backward-compatible by default: additive
-  fields, new optional query parameters, and new routes do not break
-  existing clients. A change that removes or renames a field, changes
-  a response shape, or tightens validation so previously accepted
-  requests fail is a breaking change.
-- A breaking change is never shipped silently. It requires a new
-  versioned route (the old route keeps serving), a dated deprecation
-  notice in this document naming the old route and its removal date,
-  and a removal only after that date has passed. No client is broken
-  without a documented migration path.
-- This policy is a documentation commitment, not a versioning
-  implementation: no versioned routes exist yet, because no breaking
+- The default is backward-compatible changes. Additive fields, new
+  optional query parameters, and new routes don't break existing
+  clients. A change counts as breaking when it removes or renames a
+  field, changes a response shape, or tightens validation so requests
+  that used to pass now fail.
+- A breaking change never ships quietly. It needs a new versioned route
+  (the old route keeps serving), a dated deprecation notice in this
+  document naming the old route and its removal date, and removal only
+  after that date has passed. Nobody's client gets broken without a
+  documented way to move over.
+- Honestly, this policy is a documentation commitment, not a versioning
+  implementation. No versioned routes exist yet, because no breaking
   change has been made. When the first one is needed, the versioned
   route and its deprecation notice ship in the same change.
 
 ## 2. Endpoints
 
-Methods and purposes are listed; request and response shapes follow the
-conventions above and the Zod schemas in `src/security/`, which are
-authoritative for field-level detail. A route not listed here does not
-exist.
+Methods and purposes are listed below. Request and response shapes
+follow the conventions above and the Zod schemas in `src/security/`,
+which are authoritative for field-level detail, so if this doc and a
+schema ever disagree, the schema wins on fields. A route not listed
+here does not exist. Simple as that.
 
 ### 2.1 Health (new in this change)
 
@@ -248,23 +249,24 @@ exist.
 | POST `/api/account/totp/disable` | Remove the caller's authenticator: body `{ password, code }` — the current password plus a current code; a wrong code returns 401, an unenrolled caller 409 `TOTP_NOT_ENABLED`. Same rate limit as setup. | Session |
 | GET `/api/account/totp/status` | Return `{ enrolled }` for the caller (true only for a verified row). Read-only; the UI uses it to decide whether deletion dialogs ask for a code. | Session |
 
-**Session rotation on privilege change (approved default, 2026-10-26, migration 0039).** No periodic rotation. PATCH on an organization member revokes all of that member's sessions (count in `sessionsRevoked`, also in the `membership.updated` audit details) when the new status is not active or the new role ranks below the previous role (owner > admin > member > guest); promotion and re-enable do not revoke. PATCH on a project member revokes only when the new status is not active; a project role-only change does not revoke, because project authorization is re-checked on every request. Password change revokes all other sessions and keeps the current session; password reset revokes all sessions.
+**Session rotation on privilege change (approved default, 2026-10-26, migration 0039).** No periodic rotation, that's not a thing here. PATCH on an organization member revokes all of that member's sessions (count in `sessionsRevoked`, also in the `membership.updated` audit details) when the new status is not active or the new role ranks below the previous role (owner > admin > member > guest). Promotion and re-enable do not revoke. PATCH on a project member revokes only when the new status is not active. A project role-only change does not revoke, because project authorization is re-checked on every request. Password change revokes all other sessions and keeps the current session; password reset revokes all sessions.
 | POST `/api/auth/verification/consume` | Consume a single-use verification token. | None (token) |
 | POST `/api/auth/verification/resend` (resend-verification page route) | Re-issue a verification link. Non-enumerating response. | None |
 | POST `/api/auth/password-reset/request` | Issue a single-use reset token. Non-enumerating response. | None |
 | POST `/api/auth/password-reset/complete` | Consume a reset token and set a new password (12–128 policy); revokes all sessions. | None (token) |
 
-Authentication is email + password only (see 2.2a for the removed
+Sign-in is email + password only (see 2.2a for the removed
 Google OAuth). Logged-in password change, active-session listing,
-and revoke-all are implemented (see the table above).
+and revoke-all are implemented (see the table above). That's the whole
+auth story, pretty much.
 
 ### 2.2a OAuth — REMOVED 2026-10-26 (email + password only)
 
 Google OAuth (`POST /api/auth/oauth/google/start`, `POST
 /api/auth/oauth/google/link/start`, `GET
 /api/auth/oauth/google/callback`) was implemented in migration
-0032 and removed by user decision on 2026-10-26: email + password
-is now the only sign-in path. Append-only migration 0047 drops
+0032 and removed by user decision on 2026-10-26. Email + password
+is now the only sign-in path, full stop. Append-only migration 0047 drops
 the `oauth_identities` table and the `lookup_oauth_identity`
 function and removes the `oauth-start` / `oauth-callback`
 rate-limit scopes. The routes, provider code, sign-in button,
@@ -317,10 +319,11 @@ OAuth endpoints exist anymore; requests to the old paths 404.
 ### 2.4 Projects, milestones, tasks, comments
 
 All routes below are nested under
-`/api/organizations/{organizationId}/projects/{projectId}/…` and require
+`/api/organizations/{organizationId}/projects/{projectId}/…` and need
 an active organization membership plus project visibility, enforced by
 `withOrganizationContext` and RLS. Project roles are `manager`, `member`,
-`viewer`; organization managers retain project-management authority.
+`viewer`. Organization managers keep project-management authority, which
+is the bit people usually forget.
 
 | Resource | Operations |
 | --- | --- |
@@ -331,50 +334,52 @@ an active organization membership plus project visibility, enforced by
 | Activity | Project activity feed, backed by audit events, most recent first. |
 | Analytics | GET `…/projects/{projectId}/analytics` — calculated progress, completion, overdue work, workload (including unassigned), milestone progress, recent activity (trailing seven days, at most five events), upcoming deadlines (at most eight), and rule-based health with its reason. No AI insight, no capacity percentage. |
 
-Route methods, verified against the route files: projects `GET / POST` (collection) and `GET / PATCH / DELETE` (one); milestones `GET / POST` and `GET / PATCH / DELETE`; tasks `GET / POST` and `GET / PATCH / DELETE` (DELETE archives); comments `GET / POST` and `DELETE` (one, soft-delete); activity `GET`; analytics `GET`; realtime stream `GET`; files `GET / POST` and `GET / PUT / DELETE`. There is no task, milestone, or comment edit-after-create beyond PATCH, and no comment edit endpoint.
+Route methods, verified against the route files: projects `GET / POST` (collection) and `GET / PATCH / DELETE` (one); milestones `GET / POST` and `GET / PATCH / DELETE`; tasks `GET / POST` and `GET / PATCH / DELETE` (DELETE archives); comments `GET / POST` and `DELETE` (one, soft-delete); activity `GET`; analytics `GET`; realtime stream `GET`; files `GET / POST` and `GET / PUT / DELETE`. There is no task, milestone, or comment edit-after-create beyond PATCH, and no comment edit endpoint. I checked this against the files, so it's not a guess.
 
 **Project update idempotency (opt-in).** PATCH `…/projects/{projectId}`
 accepts an optional `idempotency-key` header (same 8–128 character
 pattern as the creation routes). With a key, the update records its
 result in `project_mutation_idempotency` (operation `project.update`,
-migrations 0037–0038): a retry with the same key and body replays the stored
+migrations 0037–0038). A retry with the same key and body replays the stored
 project instead of failing on the now-stale `expectedVersion`, and the
 same key with a different body returns 409 `IDEMPOTENCY_KEY_REUSED`.
 A replay does not re-audit, re-notify, or re-publish the realtime
-event. Without a key, PATCH behaves exactly as before; a present but
-malformed key returns 400 `IDEMPOTENCY_KEY_REQUIRED`.
+event. Without a key, PATCH behaves exactly as before. A present but
+malformed key returns 400 `IDEMPOTENCY_KEY_REQUIRED`. So the key is
+what saves a retry from tripping over its own version bump.
 
 **Project deletion.** DELETE `…/projects/{projectId}` with body `{ expectedVersion }`
 (the project's current optimistic version, same bounds as update) soft-deletes
-the project: it sets `deleted_at` and `deleted_by_user_id` and writes a
+the project. It sets `deleted_at` and `deleted_by_user_id` and writes a
 `project.deleted` audit event. Only project managers, the project owner, and
 organization owners/admins may delete, following the existing authorization
-model (organization admins inherit manager authority exactly as with PATCH);
-viewers and non-members are denied, and non-project-members and cross-tenant
+model (organization admins inherit manager authority exactly as with PATCH).
+Viewers and non-members are denied, and non-project-members and cross-tenant
 callers receive 404 `PROJECT_NOT_FOUND` rather than 403, so the endpoint
 never leaks a project's existence. A stale `expectedVersion` returns 409
-`VERSION_CONFLICT`; a second delete returns 404. The delete runs under the
+`VERSION_CONFLICT`. A second delete returns 404. The delete runs under the
 project lifecycle lock, shares PATCH's rate limit (`project-management-user`),
 and sends no project-member notification. A deleted project is immediately
-invisible to everyone: it disappears from the project list, search (all
+invisible to everyone. It disappears from the project list, search (all
 entity types), analytics, activity, milestones, tasks, comments, files
 (including previously issued signed download links, which return 404), and
 notification lists and unread counts. There is no recovery UI. After 30 days
 the retention cleanup (see `DATABASE.md`) permanently purges the project and
 its tasks, milestones, comments, files, notifications, and memberships, in
-foreign-key order; audit events are retained indefinitely. The UI confirms
+foreign-key order. Audit events are retained indefinitely. The UI confirms
 deletion in a danger zone on the project page (see `DESIGN.md`) and returns
-to the organization page, where the project is absent from the list.
+to the organization page, where the project is absent from the list. Gone
+means gone, from the list at least, straight away.
 
 **Organization deletion.** DELETE `/api/organizations/{organizationId}`
-with body `{ slug }` soft-deletes the organization: it sets
+with body `{ slug }` soft-deletes the organization. It sets
 `status = 'deletion_pending'`, `deleted_at`, and `deleted_by_user_id` and
 writes an `organization.deleted` audit event. Only the organization owner
-may delete — admins are denied with 403
+may delete. Admins are denied with 403
 `ORGANIZATION_MANAGEMENT_REQUIRED`, and non-members with 403
-`ORGANIZATION_ACCESS_DENIED`. The slug confirmation must match exactly;
-a mismatch returns 409 `ORGANIZATION_SLUG_MISMATCH`, and a second delete
-returns 404. A deleted organization is immediately invisible to everyone:
+`ORGANIZATION_ACCESS_DENIED`. The slug confirmation must match exactly.
+A mismatch returns 409 `ORGANIZATION_SLUG_MISMATCH`, and a second delete
+returns 404. A deleted organization is immediately invisible to everyone.
 `withOrganizationContext` rejects non-active organizations, so project
 lists, search, notifications, activity, members, tasks, and files under
 it all return 404 `ORGANIZATION_NOT_FOUND`, and the organization list
@@ -382,9 +387,9 @@ excludes it. There is no recovery UI. After 30 days the retention
 cleanup (see `DATABASE.md`) permanently purges the organization's
 projects, tasks, comments, files, invitations, notification preferences,
 and memberships, in foreign-key order, and removes purged files from
-disk; notifications cascade from their projects. Audit events are
+disk. Notifications cascade from their projects. Audit events are
 retained indefinitely, so the organization row itself is never
-hard-deleted: it remains as a tombstone (id, slug, deletion metadata,
+hard-deleted. It remains as a tombstone (id, slug, deletion metadata,
 `purged_at`), which also keeps its slug reserved against re-registration.
 The UI confirms deletion in a danger zone on the organization page that
 requires typing the workspace address, and returns to the workspaces
@@ -425,14 +430,14 @@ Base path:
 | --- | --- | --- |
 | GET `/api/cron/{job}` | Run one scheduled job: `due-date` (reminders for tasks due tomorrow), `cleanup` (expired-record purge + file-object removal), `email-outbox` (one notification-email worker batch), `alerts` (metrics alerting on the SMTP path), `healing` (bounded auto-healing: purge expired sessions; disabled entirely by `NEXORA_HEALING_DISABLED=1`), `scan-retry` (re-dispatch async scan jobs for active pending files older than 1 hour and younger than 7 days, capped at 50 per run; migration 0064). A second call the same day replays the first run's result; a failed run can be retried the same day. | `x-nexora-cron-token` header OR `Authorization: Bearer` with the same token (the form Vercel Cron sends when `CRON_SECRET` equals `NEXORA_CRON_TOKEN`); `NEXORA_CRON_TOKEN` env; unset token → 503, wrong token → 401, unknown job → 404. Authentication runs before routing (2026-10-29 operator-controls round): an unknown job with a wrong token is a 401, not a 404, so job names are not enumerable; an unknown job with a valid token is still a 404. There is deliberately no lockout on cron: token spam must never deny scheduled jobs. Every call consumes the DB-backed per-IP rate limit (scope `operator-cron`, 120/hour, migration 0063); beyond it → 429, and a missing/invalid trusted-IP header in production → 503. Failed authentications are logged as `operator.auth_failed` events (endpoint only, never the token). The origin check does not apply (cron callers are not browsers). Schedule lives in `vercel.json` (daily on Hobby; see `docs/deployment.md` §6a). |
 
-Alerts: server-error total crossing a new multiple of
+Alerts, then. Two triggers, both mailed to
+`NEXORA_ALERT_EMAIL`. One is the server-error total crossing a new multiple of
 `NEXORA_ALERT_SERVER_ERROR_THRESHOLD` (default 10) since the last
-alert, and database-down (at most once an hour), each mailed to
-`NEXORA_ALERT_EMAIL`. Blank `NEXORA_ALERT_EMAIL` means alerts are
-disabled. Storage quota: an explicit per-organization quota always
-wins; otherwise `NEXORA_DEFAULT_STORAGE_QUOTA_BYTES` (opt-in,
-positive integer bytes, recommended 1073741824 = 1 GiB) applies;
-blank means no cap, as before.
+alert. The other is database-down, at most once an hour. Blank `NEXORA_ALERT_EMAIL` means alerts are
+disabled, plain and simple. Storage quota works like this: an explicit per-organization quota always
+wins. Otherwise `NEXORA_DEFAULT_STORAGE_QUOTA_BYTES` (opt-in,
+positive integer bytes, recommended 1073741824 = 1 GiB) applies.
+Blank means no cap, as before.
 
 ## 3. External APIs and integrations
 
@@ -445,28 +450,28 @@ blank means no cap, as before.
 
 ## 4. Webhooks
 
-One inbound webhook exists: the scan-result callback for async
+One inbound webhook exists. It's the scan-result callback for async
 malware scanning (design:
 `docs/async-scan-github-actions-design.md`). It follows the
-rules this section used to state for a future webhook:
-authentication is a shared secret (`x-nexora-scan-secret`
+rules this section used to state for a future webhook.
+Authentication is a shared secret (`x-nexora-scan-secret`
 header, timing-safe compare) verified before any business
-logic; the payload is validated with a Zod schema
+logic. The payload is validated with a Zod schema
 (`scanCallbackSchema`: file ID, positive version, outcome
-`clean` | `infected` | `error`, run ID); redelivery is safe
+`clean` | `infected` | `error`, run ID). Redelivery is safe
 because the SECURITY DEFINER function (migration 0064)
 applies a verdict only while the row is still `pending` at
 the dispatched version, so a duplicate or stale delivery is a
-no-op; only safe metadata is logged; a missing secret fails
-closed with 503 and a wrong secret with 401; and no
+no-op. Only safe metadata is logged. A missing secret fails
+closed with 503 and a wrong secret with 401. And no
 caller-supplied tenant, role, or user ID is trusted (the
-callback carries no tenant claim at all — the function looks
+callback carries no tenant claim at all, the function looks
 the row up by file ID and version). There is no IP rate limit
-on this endpoint in v1 (GitHub egress IPs vary); the secret
+on this endpoint in v1 (GitHub egress IPs vary). The secret
 plus the pending-only transition are the controls. The
 endpoint always answers 200 after authentication, whether
-applied or ignored; a 500 means the verdict could not be
-recorded at all.
+applied or ignored. A 500 means the verdict could not be
+recorded at all. That's the only time a 500 shows up here.
 
 | Method and path | Purpose | Auth |
 | --- | --- | --- |
@@ -516,11 +521,11 @@ recorded at all.
   emails or file content), purpose limitation (a token is used only for
   its one purpose), access control (server-side, RLS-backed), safe
   logging (no passwords, tokens, keys, or link parameters), and short-lived
-  signed links.
+  signed links. Nothing fancy, just the minimum needed.
 - **Third-party disclosure:** SMTP is the only external recipient of user
   data today, and it receives account email addresses and account-link
-  tokens. That disclosure is not yet documented to users; documenting it
-  is a release task, not an afterthought.
+  tokens. That disclosure is not yet documented to users. Documenting it
+  is a release task, not an afterthought. Yeah, that gap is still open.
 - **Failure handling, by dependency:**
   - Database unavailable: safe service-unavailable behaviour; never a
     false success for a write. The health endpoint reports `unavailable`
@@ -529,15 +534,15 @@ recorded at all.
     verification-resend return 503 `EMAIL_DELIVERY_UNAVAILABLE` and
     never claim a link "will arrive" when delivery failed. A failed
     registration creates no account during an outage, because SMTP
-    verification runs before account creation; a transient failure
+    verification runs before account creation. A transient failure
     after verification leaves a valid, unverified account whose owner
     can resend once SMTP recovers.
   - File storage unavailable: upload failure without corrupting
     task/project state.
-  - AI provider unavailable (future): the application remains usable;
-    the AI feature shows a controlled failure with a retry option.
+  - AI provider unavailable (future): the application remains usable.
+    The AI feature shows a controlled failure with a retry option.
   - WebSocket unavailable (future): fallback to refresh/polling.
-  - Queue unavailable (future): do not silently lose important jobs;
-    persist and retry where the architecture supports it.
+  - Queue unavailable (future): do not silently lose important jobs.
+    Persist and retry where the architecture supports it.
   - Client disconnect during a mutation: idempotency and reconciliation
     prevent duplicate side effects.

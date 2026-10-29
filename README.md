@@ -1,129 +1,74 @@
 # Nexora
 
-Nexora is a team project workspace for organizing projects, milestones, tasks, and collaboration in one tenant-scoped product. PostgreSQL is authoritative for accounts, workspaces, projects, and work-item data. The uploaded product requirements document is the product contract; it is not required to build or run this repository.
+Nexora is a web app where a team plans work together, in one place.
+You open it in a browser. There is nothing to install.
 
-This repository is an actively developed local foundation, not a production-ready service. AI and real-time collaboration are not implemented. The current file backend is a private local filesystem and needs durable encrypted shared storage before a multi-instance deployment.
+It is live at https://nexora-two-ruby.vercel.app.
 
-## Included
+## What Nexora is
 
-- Accounts with email verification, password reset, opaque database-backed sessions, and rate limits.
-- Organization and project roles, verified-email invitations, membership controls, and tenant-aware PostgreSQL row-level security.
-- Projects, milestones, tasks, configurable workflows, Kanban/list views, comments, mentions, activity, and in-app notifications.
-- Private task attachments with content validation, scoped access, short-lived signed downloads, version-checked replacement, and 30-day retention logic.
-- Permission-aware workspace search and project analytics calculated from authorized PostgreSQL data.
+A team uses Nexora to keep its work visible. Work is split into small jobs, and everyone can see who is doing what and what is still open.
+A workspace is the shared space for one team. Inside a workspace, a project is one piece of work. A milestone is a checkpoint inside a project, with a date attached. A task is a single job inside a project.
 
-AI-generated insights, email notification delivery, presence, and WebSocket synchronization are not available. Analytics are deterministic summaries, not AI predictions.
+## Who uses it
 
-## Architecture at a Glance
+Teams that need to plan work together use it. One person sets up the workspace, and teammates join it. Each person works on their own tasks and can see the tasks of others in the same workspace.
+
+## What you can do in it
+
+Teams create workspaces, projects, milestones, and tasks. A task can have a date, a person assigned to it, and notes about what needs to happen.
+Tasks can be viewed two ways. Kanban view shows tasks on a board, in columns that show how far along each task is. List view shows the same tasks in rows, one after another.
+Teammates can leave comments on a task. A mention tags a teammate by name, so that person knows the comment is for them. An activity record lists recent changes, so the team can see what moved and who changed it.
+Workspace search finds work across a workspace, by name or by words in it. Project analytics gives a summary of how a project is going, based on its tasks and milestones.
+When one person changes something, other people see that change in the app without waiting for a fresh page load. That is what live updates mean here.
+In-app notifications tell you about changes that concern you, inside Nexora itself.
+
+## How a team uses Nexora day to day
+
+```mermaid
+flowchart TD
+    A[Sign up and confirm your email] --> B[Create or join a workspace]
+    B --> C[Open a project inside the workspace]
+    C --> D[Add tasks and set dates]
+    D --> E[Move each task along as work progresses]
+    E --> F[Leave comments and tag teammates]
+    F --> G[Mark the task done]
+    G --> H[Check project progress]
+```
+
+## How the pieces fit together
+
+Your browser shows the pages you click through. The Nexora app handles those pages and the work behind them. A database stores the records for workspaces, projects, tasks, and comments. Uploaded files are kept apart, in a private file store. An email service sends the messages Nexora needs to send, such as verification mail and password reset mail.
 
 ```mermaid
 flowchart LR
-  browser[Browser on APP_ORIGIN] -->|same-origin pages and API| web[Next.js application]
-  web --> session[Verified session and input checks]
-  session --> tenant[Organization context and role checks]
-  tenant -->|restricted runtime role plus RLS| db[(PostgreSQL)]
-  tenant -->|opaque keys only| files[(Private file directory)]
-  web -->|verification, recovery, invitations| smtp[Configured SMTP provider]
-  deploy[Migration operator] -->|separate migration credentials| db
+    A[Your browser] --> B[Nexora app]
+    B --> C[Database]
+    C --> D[Project and task records]
+    B --> E[Private file store]
+    E --> F[File scan]
+    B --> G[Email service]
+    G --> H[Verification and password reset emails]
 ```
 
-For project data, identity and tenant context are set inside each database transaction. PostgreSQL RLS is a second boundary, not a replacement for the server-side membership and role checks. The browser never receives database credentials or file storage keys.
+## Files and safety checks
+
+Files uploaded to Nexora are kept private to the workspace. Before a file can be downloaded, it is checked and scanned. A clean file can be downloaded. A file that fails the scan, or one whose scan is still running, cannot be downloaded. The download is refused in both cases, and the file stays unavailable until the check is passed.
 
 ```mermaid
-flowchart LR
-  upload[Same-origin file upload] --> validate[Authorize, rate-limit, bound and validate bytes]
-  validate --> stage[Write opaque object outside public/]
-  stage --> metadata[Commit metadata, audit and idempotency state]
-  metadata --> dto[Return safe file metadata]
-  link[Authenticated download request] --> token[Issue short-lived user/file/version token]
-  token --> verify[Recheck membership, file state and version]
-  verify --> hash[Read private object and verify SHA-256]
-  hash --> attachment[Stream as a non-cacheable attachment]
+flowchart TD
+    A[Teammate uploads a file] --> B[File is held private]
+    B --> C[File is checked and scanned]
+    C --> D{Is the file clean?}
+    D -->|Yes, and the scan is finished| E[File can be downloaded]
+    D -->|No, or the scan is still running| F[Download is refused]
+    F --> G[Teammate sees that the file is not available]
 ```
 
-## Requirements
+## Signing in safely
 
-- Node.js 22 or newer.
-- PostgreSQL 16 or newer.
-- Two separate PostgreSQL roles: a migration owner and a restricted runtime role. The runtime role must not own application tables and must not have `SUPERUSER`, `BYPASSRLS`, `CREATEDB`, or `CREATEROLE`.
+Email verification means you confirm your email address belongs to you, by following a link sent to that address. Password reset means you can ask for a new password by email if you forget the old one. A login session keeps you signed in after you sign in, so you do not type your password on every page. Two-factor sign-in adds a second step: after your password, you enter a code from an authenticator app on your phone.
 
-Install dependencies and create a local environment file:
+## AI help, with a check before anything is created
 
-```sh
-npm ci
-cp .env.example .env.local
-```
-
-Generate distinct secrets for `AUTH_RATE_LIMIT_HMAC_KEY` and `NEXORA_FILE_SIGNING_KEY` with `openssl rand -hex 32`. Keep `.env.local` out of version control and never use production credentials for development or tests.
-
-Create the local database roles and database using an administrative PostgreSQL account. Replace the example passwords with strong, unique values:
-
-```sql
-CREATE ROLE nexora_migrator LOGIN PASSWORD 'replace-this-migrator-password'
-  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;
-CREATE ROLE nexora_app LOGIN PASSWORD 'replace-this-runtime-password'
-  NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
-CREATE DATABASE nexora OWNER nexora_migrator;
-GRANT CONNECT ON DATABASE nexora TO nexora_app;
-```
-
-Set `MIGRATOR_DATABASE_URL` to the database using `nexora_migrator` and `DATABASE_URL` to the same database using `nexora_app`. Then apply migrations and the runtime grants:
-
-```sh
-npm run db:migrate
-psql "$MIGRATOR_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/runtime-grants.sql
-npm run dev
-```
-
-The migration runner uses an advisory lock, applies each numbered migration transactionally, records SHA-256 checksums, and refuses changes to applied migrations. Add a new migration for every schema or policy change. Apply `db/runtime-grants.sql` as the migration owner after migrations on each database.
-
-The Node-based migration, test, and file-cleanup scripts load `.env.local` when it exists; variables already present in the process environment take precedence. Next.js loads the same file for app commands.
-
-## Configuration
-
-`.env.example` documents the supported settings. In addition to the database URLs and secrets:
-
-- Set `APP_ORIGIN` to the canonical browser origin used by same-origin mutation checks and account links.
-- Configure SMTP for verification, recovery, and invitations. TLS is required by default; `SMTP_REQUIRE_TLS=false` is for controlled local-only testing.
-- Set `NEXORA_PRIVATE_FILE_DIR` to a dedicated server-only directory outside `public/`. Production needs durable encrypted storage shared by app and cleanup instances.
-- In production, set `NEXORA_TRUSTED_CLIENT_IP_HEADER` to one client-IP header overwritten by a trusted ingress. Do not trust a client-supplied `X-Forwarded-For` chain.
-- Keep `MIGRATOR_DATABASE_URL` separate from the restricted runtime `DATABASE_URL`; never expose either to the browser.
-- The browser application and API are same-origin only. No CORS allow-origin response header is enabled; do not add a wildcard or credentialed cross-origin policy at the app or ingress.
-
-File uploads are limited to 10 MiB each, 20 active files and 100 MiB per task. Deleted files become inaccessible immediately and are physically purged after 30 days. Schedule `npm run files:cleanup` at least daily with the restricted runtime role and the same private storage mount. The command is provided, but the repository does not configure or monitor a scheduler. Optional malware scanning is not configured; uploaded documents must not be treated as trusted input.
-
-## Checks
-
-```sh
-npm run lint
-npm run typecheck
-npm test
-npm run check
-npm run build
-```
-
-`npm run check` runs lint, typecheck, and tests. PostgreSQL integration cases run only when `NEXORA_TEST_DATABASE_URL` is configured; without it, those cases are skipped. For full local verification, create a disposable `nexora_test` database with the same separate roles, set `NEXORA_TEST_MIGRATOR_DATABASE_URL` and `NEXORA_TEST_DATABASE_URL` in `.env.local`, then run:
-
-```sh
-MIGRATOR_DATABASE_URL="$NEXORA_TEST_MIGRATOR_DATABASE_URL" npm run db:migrate
-psql "$NEXORA_TEST_MIGRATOR_DATABASE_URL" -v ON_ERROR_STOP=1 -f db/runtime-grants.sql
-npm run check
-```
-
-The database test suite writes fixture rows and must never point to production or persistent user data. The `.env.example` values are placeholders, not working credentials.
-
-## Security Boundaries
-
-Tenant-aware server code must derive identity from a verified server-side session and use `withOrganizationContext(userId, organizationId, callback, minimumRole)`. Do not accept user IDs or roles from request data. Use parameterized SQL and keep each tenant operation inside the helper's transaction. RLS is defense in depth, not a replacement for application authorization.
-
-Authentication cookies are host-only, `HttpOnly`, `SameSite=Strict`, and `Secure` in production. Session and email-link tokens are stored as hashes. Mutations require the canonical origin and reject cross-site Fetch Metadata. Task files stay outside public paths; API responses never expose storage keys. See `docs/threat-model.md` for current controls and residual risks.
-
-Nexora does not enable cross-origin API access: JSON responses do not include `Access-Control-Allow-Origin`, and mutation handlers require the configured `APP_ORIGIN`. CORS is not authentication; an ingress must not add wildcard CORS headers or credentialed access from untrusted sites.
-
-## Project Notes
-
-- `docs/prd-traceability.md` tracks implementation and verification against all 45 PRD sections.
-- `docs/architecture.md` documents system boundaries, API behavior, and deferred infrastructure.
-- `docs/threat-model.md` records threats, current controls, verification, and remaining deployment risks.
-
-Local tests, a successful production build, and this documentation are not evidence of production readiness, regulatory compliance, accessibility certification, performance capacity, or an independent security assessment. Configure backups and restore tests, monitoring, encrypted shared storage, SMTP, trusted ingress, and an operational cleanup schedule before launch.
+Nexora has AI help that can draft a summary, a list of risks, a plan, or follow-ups from meeting notes. Draft means a first version for a person to read. Nothing is created from a draft until the user reviews it and agrees to it. In the app, this help is labelled "AI-generated", so it is clear which text came from that help and which text a person wrote.
