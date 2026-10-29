@@ -386,9 +386,12 @@ each item below has been checked for that screen.
   feature-card grid, no fake metrics, no testimonial block.
 - The home hero is a photo-background hero by explicit user decision
   (2026-10-29), not a gradient hero: its background photo host is
-  allow-listed for images only, and its header logo blends into the dark
-  photo with a lighten blend over a dark overlay. It still carries only
-  real Nexora copy and real account actions.
+  allow-listed for images only, and the brand logo on every page
+  follows the music-and-movies-show technique exactly — the leaf light
+  variant as a true transparent PNG, rendered as a plain image with no
+  blend mode, no background and no box, plus the same subtle
+  drop-shadow glow. It still carries only real Nexora copy and real
+  account actions.
 - Do not use a component library's default styling. Nexora's components are
   custom and token-driven; a library component, if ever adopted, must be
   restyled to these tokens before it ships.

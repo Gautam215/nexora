@@ -75,7 +75,7 @@ button {
   display: block;
   height: 32px;
   width: auto;
-  border-radius: 8px;
+  filter: drop-shadow(0 0 8px rgba(191, 222, 216, 0.12));
 }
 
 .home-hero {
@@ -118,7 +118,7 @@ button {
   display: block;
   height: 36px;
   width: auto;
-  mix-blend-mode: lighten;
+  filter: drop-shadow(0 0 8px rgba(191, 222, 216, 0.12));
 }
 
 .home-hero-content {
