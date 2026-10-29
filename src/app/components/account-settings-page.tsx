@@ -82,6 +82,7 @@ export default function AccountSettingsPage() {
   const [totpSetup, setTotpSetup] = useState<{ secret: string; otpauthUrl: string; qrSvg?: string } | null>(null);
   const [totpAppChoice, setTotpAppChoice] = useState<"google" | "microsoft" | null>(null);
   const [totpShowManual, setTotpShowManual] = useState(false);
+  const [totpShowDisable, setTotpShowDisable] = useState(false);
   const [totpCode, setTotpCode] = useState("");
   const [totpDisablePassword, setTotpDisablePassword] = useState("");
   const [totpPending, setTotpPending] = useState(false);
@@ -196,6 +197,7 @@ export default function AccountSettingsPage() {
         return;
       }
       setTotpEnrolled(false);
+      setTotpShowDisable(false);
       setTotpCode("");
       setTotpDisablePassword("");
       setTotpSuccess("Authenticator disabled.");
@@ -718,35 +720,48 @@ export default function AccountSettingsPage() {
                   <p className="form-message form-success" role="status" aria-live="polite">{totpSuccess}</p>
                 )}
                 {totpEnrolled ? (
-                  <form className="confirm-panel" onSubmit={disableTotp}>
+                  <div>
                     <p>Authenticator is enabled.</p>
-                    <label className="form-field">
-                      <span>Current password</span>
-                      <input
-                        type="password"
-                        value={totpDisablePassword}
-                        onChange={(event) => setTotpDisablePassword(event.target.value)}
-                        autoComplete="current-password"
-                        required
-                      />
-                    </label>
-                    <label className="form-field">
-                      <span>Authenticator code</span>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        value={totpCode}
-                        onChange={(event) => setTotpCode(event.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
-                        autoComplete="one-time-code"
-                        required
-                      />
-                    </label>
-                    <div className="confirm-actions">
-                      <button className="danger-button" type="submit" disabled={totpPending}>
-                        {totpPending ? "Disabling..." : "Disable authenticator"}
-                      </button>
-                    </div>
-                  </form>
+                    {!totpShowDisable ? (
+                      <div className="confirm-actions">
+                        <button className="quiet-button" type="button" onClick={() => setTotpShowDisable(true)} disabled={totpPending}>
+                          Disable authenticator
+                        </button>
+                      </div>
+                    ) : (
+                      <form className="confirm-panel" onSubmit={disableTotp}>
+                        <label className="form-field">
+                          <span>Current password</span>
+                          <input
+                            type="password"
+                            value={totpDisablePassword}
+                            onChange={(event) => setTotpDisablePassword(event.target.value)}
+                            autoComplete="current-password"
+                            required
+                          />
+                        </label>
+                        <label className="form-field">
+                          <span>Authenticator code</span>
+                          <input
+                            type="text"
+                            inputMode="numeric"
+                            value={totpCode}
+                            onChange={(event) => setTotpCode(event.target.value.replace(/[^0-9]/g, "").slice(0, 6))}
+                            autoComplete="one-time-code"
+                            required
+                          />
+                        </label>
+                        <div className="confirm-actions">
+                          <button className="danger-button" type="submit" disabled={totpPending}>
+                            {totpPending ? "Disabling..." : "Disable authenticator"}
+                          </button>
+                          <button className="quiet-button" type="button" onClick={() => setTotpShowDisable(false)} disabled={totpPending}>
+                            Cancel
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
                 ) : totpSetup ? (
                   <form className="confirm-panel" onSubmit={verifyTotpSetup}>
                     {totpSetup.qrSvg && !totpShowManual ? (
