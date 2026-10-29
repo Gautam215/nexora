@@ -332,9 +332,11 @@ each item below has been checked for that screen.
 - **Auth pages:** centred, capped-width form in the shared auth shell. One
   heading, one form, one primary action, secondary links below. No sidebar,
   no marketing copy, no decorative panel.
-- **Home / landing (signed out):** intro block (eyebrow, heading, copy,
-  status pill), centred, capped at 690 px. It states what Nexora is and
-  nothing it does not yet do.
+- **Home / landing (signed out):** full-viewport photo hero (header logo,
+  centred eyebrow, heading, copy, and the real account actions), followed
+  by the covers block. It states what Nexora is and nothing it does not
+  yet do. The hero carries no demo text, no fake navigation, partners,
+  badges, or calls to action.
 - **Workspace / organization list:** list of organizations with name,
   membership, and a way into each workspace. Empty state: create an
   organization.
@@ -382,6 +384,11 @@ each item below has been checked for that screen.
   decorative illustration without a documented decision.
 - Do not copy a generic SaaS dashboard template: no gradient hero, no
   feature-card grid, no fake metrics, no testimonial block.
+- The home hero is a photo-background hero by explicit user decision
+  (2026-10-29), not a gradient hero: its background photo host is
+  allow-listed for images only, and its header logo blends into the dark
+  photo with a lighten blend over a dark overlay. It still carries only
+  real Nexora copy and real account actions.
 - Do not use a component library's default styling. Nexora's components are
   custom and token-driven; a library component, if ever adopted, must be
   restyled to these tokens before it ships.

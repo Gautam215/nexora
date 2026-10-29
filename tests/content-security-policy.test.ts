@@ -12,6 +12,7 @@ test("production CSP uses the request nonce and denies unsafe inline code", () =
   assert.match(policy, /form-action 'self'/);
   assert.match(policy, /frame-ancestors 'none'/);
   assert.match(policy, /upgrade-insecure-requests/);
+  assert.match(policy, /img-src 'self' blob: data: https:\/\/cdn\.21st\.dev/);
   assert.doesNotMatch(policy, /'unsafe-inline'/);
   assert.doesNotMatch(policy, /'unsafe-eval'/);
 });
