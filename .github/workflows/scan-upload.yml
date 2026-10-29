@@ -1,0 +1,75 @@
+# Async malware scan for Nexora task-file uploads.
+#
+# Triggered by repository_dispatch from the app (see
+# src/server/scan-dispatch.ts), never by a push. The workflow
+# deliberately has NO checkout step: it needs no repo code, only
+# the dispatched file. Permissions are least-privilege
+# (contents: none) for the same reason.
+#
+# The presigned download URL arrives in client_payload. It is
+# short-lived (900 s) and is passed only via env — no step may
+# echo or print it, because it is not a registered secret and
+# GitHub would not mask it. The runner is ephemeral (a fresh VM
+# per run), so scanning an untrusted file here has no
+# persistent host to infect.
+#
+# The signature cache is best-effort: the cache action runs as
+# the runner user while /var/lib/clamav is root-owned, so a
+# restore may miss. freshclam always runs afterwards, so a miss
+# only costs a full signature download, never a wrong verdict.
+# clamscan exit codes: 0 clean, 1 infected, 2 error. The report
+# step runs even when earlier steps fail (if: always()), so a
+# download or scan failure still reports 'error' — which the
+# app quarantines (fail closed) — instead of leaving the file
+# pending until the daily retry.
+name: scan-upload
+on:
+  repository_dispatch:
+    types: [nexora-scan]
+permissions:
+  contents: none
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Install ClamAV
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq clamav
+      - name: Restore signature cache
+        uses: actions/cache@v4
+        with:
+          path: /var/lib/clamav
+          key: clamav-db-v1
+      - name: Update signatures
+        run: sudo freshclam --quiet || sudo freshclam --quiet
+      - name: Download file
+        env:
+          SCAN_URL: ${{ github.event.client_payload.downloadUrl }}
+          EXPECTED_SHA256: ${{ github.event.client_payload.sha256 }}
+        run: |
+          curl -fsSL --max-time 120 -o scan-target "$SCAN_URL"
+          echo "$EXPECTED_SHA256  scan-target" | sha256sum -c -
+      - name: Scan
+        id: scan
+        run: |
+          set +e
+          clamscan --no-summary scan-target
+          echo "code=$?" >> "$GITHUB_OUTPUT"
+      - name: Report result
+        if: always()
+        env:
+          APP_URL: ${{ secrets.NEXORA_APP_URL }}
+          SCAN_SECRET: ${{ secrets.NEXORA_SCAN_WEBHOOK_SECRET }}
+        run: |
+          case "${{ steps.scan.outputs.code }}" in
+            0) outcome="clean" ;;
+            1) outcome="infected" ;;
+            *) outcome="error" ;;
+          esac
+          curl -fsSL --max-time 30 -X POST "$APP_URL/api/internal/scan-result" \
+            -H "content-type: application/json" \
+            -H "x-nexora-scan-secret: $SCAN_SECRET" \
+            -d "$(jq -n --arg f "${{ github.event.client_payload.fileId }}" \
+              --argjson v "${{ github.event.client_payload.version }}" \
+              --arg o "$outcome" --arg r "${{ github.run_id }}" \
+              '{fileId: $f, version: $v, outcome: $o, runId: $r}')"
