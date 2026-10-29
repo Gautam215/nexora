@@ -3974,3 +3974,39 @@ h1 {
 .project-work-layout .danger-button:active {
   transform: scale(0.97);
 }
+
+/* Boxes hug their content (Apple card rule): row boxes end where their
+   words end instead of stretching across the page. Scoped to app
+   shells, so the home page is untouched. Form containers
+   (.workspace-card) and grid panels (.analytics-panel) are deliberately
+   excluded — a form card and a dashboard grid need their fixed widths. */
+.auth-layout .organization-card,
+.auth-layout .project-card,
+.auth-layout .milestone-card,
+.auth-layout .task-card,
+.auth-layout .workspace-status-card,
+.auth-layout .confirm-panel,
+.project-work-layout .organization-card,
+.project-work-layout .project-card,
+.project-work-layout .milestone-card,
+.project-work-layout .task-card,
+.project-work-layout .workspace-status-card,
+.project-work-layout .confirm-panel {
+  width: fit-content;
+  max-width: 100%;
+  border-radius: 14px;
+}
+
+/* Notifications: one centred, light blur box for the whole section. */
+.auth-layout .notification-center-panel,
+.project-work-layout .notification-center-panel {
+  width: min(100%, 720px);
+  margin-inline: auto;
+  padding: clamp(20px, 4vw, 32px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.08);
+  -webkit-backdrop-filter: blur(20px) saturate(1.25);
+  backdrop-filter: blur(20px) saturate(1.25);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
