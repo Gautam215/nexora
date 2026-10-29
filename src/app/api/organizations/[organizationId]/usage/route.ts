@@ -9,7 +9,7 @@ interface RouteContext {
   params: Promise<{ organizationId: string }>;
 }
 
-// Organization usage (PRD 40: cost tracking beyond the quota/usage
+// Organization usage (cost tracking beyond the quota/usage
 // fields on the organization). Read-only. Storage bytes, file count,
 // and quota come from task_files and the organization row; AI token
 // usage comes from succeeded ai_executions rows, per workflow, for

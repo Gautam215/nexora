@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import nextConfig from "../next.config.ts";
 
-// Regression test for PRD 29: the security headers shipped by the Next.js
+// Regression test for the security headers shipped by the Next.js
 // config must not silently lose an entry. The CSP itself is covered by
 // tests/content-security-policy.test.ts; this file pins the static headers
 // and the frame-ancestors denial that keeps the app unframeable.

@@ -25,7 +25,7 @@ interface CreatedTask {
   title: string;
 }
 
-// AI meeting-notes extraction (PRD 19). Two explicit steps: generate
+// AI meeting-notes extraction. Two explicit steps: generate
 // returns a draft and creates NOTHING; only the confirm button creates
 // tasks in this project, after the user reviewed the draft. Owners and
 // deadlines from the notes are text only — they are never resolved to
@@ -121,12 +121,11 @@ export default function AiExtractionPanel({
     <section className="project-detail-section" aria-labelledby="ai-extraction-title">
       <div className="project-section-heading">
         <div>
-          <p className="eyebrow">AI-generated</p>
           <h3 id="ai-extraction-title">AI meeting-notes extraction</h3>
         </div>
       </div>
       <p className="project-section-copy">
-        Paste meeting notes and review the AI-generated draft before anything is created. Confirming creates the
+        Paste meeting notes and review the draft before anything is created. Confirming creates the
         draft&apos;s tasks in this project.
       </p>
       <label className="form-field">

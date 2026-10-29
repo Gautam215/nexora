@@ -20,7 +20,7 @@ interface RouteContext {
   params: Promise<{ organizationId: string }>;
 }
 
-// AI meeting-notes summary (PRD 20): a free-text summary of meeting
+// AI meeting-notes summary: a free-text summary of meeting
 // notes supplied by the caller. Read-only: nothing is created. A
 // meeting has no project record, so unlike the project summary this
 // workflow takes notes directly; the notes travel as the

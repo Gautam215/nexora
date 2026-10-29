@@ -45,7 +45,7 @@ export default function AccountSettingsPage() {
 
   const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null);
   const [confirmRevokeOthers, setConfirmRevokeOthers] = useState(false);
-  // Focus management for the sign-out confirm panels (PRD 37):
+  // Focus management for the sign-out confirm panels:
   // opening a panel moves focus into it (autoFocus on its danger
   // button), and closing it returns focus to the row's trigger
   // button. The trigger button itself unmounts while its panel is

@@ -29,7 +29,7 @@ interface CreatedProject {
   name: string;
 }
 
-// AI project planning (PRD 18). Two explicit steps, never one:
+// AI project planning. Two explicit steps, never one:
 // generate returns a draft and creates NOTHING; only the confirm
 // button creates the project, and only after the user reviewed the
 // draft and named the project. The confirm carries a client-generated
@@ -114,12 +114,11 @@ export default function AiPlanningPanel({ organizationId }: { organizationId: st
     <section className="project-detail-section" aria-labelledby="ai-planning-title">
       <div className="project-section-heading">
         <div>
-          <p className="eyebrow">AI-generated</p>
           <h3 id="ai-planning-title">AI project planning</h3>
         </div>
       </div>
       <p className="project-section-copy">
-        Describe a goal and review the AI-generated draft before anything is created. Confirming creates a new
+        Describe a goal and review the draft before anything is created. Confirming creates a new
         project with the draft&apos;s milestones, tasks, subtasks, and dependencies.
       </p>
       <label className="form-field">

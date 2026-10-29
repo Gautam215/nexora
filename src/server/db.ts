@@ -150,8 +150,7 @@ export function getDatabasePoolStats(): {
   };
 }
 
-// Operator aggregates for the token-gated /api/metrics endpoint (PRD
-// 33). The AI and outbox aggregates run SECURITY DEFINER (migration
+// Operator aggregates for the token-gated /api/metrics endpoint. The AI and outbox aggregates run SECURITY DEFINER (migration
 // 0061) because the app role cannot read those tables directly;
 // scheduled_job_runs has no RLS and the app role holds SELECT on it.
 // Since migration 0066 the app role no longer holds EXECUTE on the

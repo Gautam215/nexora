@@ -1,6 +1,6 @@
 "use client";
 
-// Route error boundary (PRD 35): when a page throws during render,
+// Route error boundary: when a page throws during render,
 // Next.js renders this instead of an unstyled failure. The message is
 // deliberately generic: the real error (which may contain internal
 // detail) is logged server-side by Next.js and is never rendered

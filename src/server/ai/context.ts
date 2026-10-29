@@ -2,7 +2,7 @@ import "server-only";
 import type { DatabaseTransaction } from "../db.ts";
 import type { AiWorkflow } from "./provider.ts";
 
-// Authorized AI context retrieval (PRD 20, 22, 23; plan Phase 6 task 2).
+// Authorized AI context retrieval (plan Phase 6 task 2).
 // The ONLY data an AI workflow may see is data the requesting user can
 // already access, read through the same tenant gates as the product's
 // own routes — never a bulk tenant dump filtered by the model. The
@@ -12,7 +12,7 @@ import type { AiWorkflow } from "./provider.ts";
 // access yields null, which the route reports as PROJECT_NOT_FOUND,
 // indistinguishable from a missing project.
 //
-// Budgets and hygiene (PRD 23: "limit context", "redact secrets",
+// Budgets and hygiene ("limit context", "redact secrets",
 // "treat user/project content as untrusted data"):
 // - Per-section row caps and a total character cap, with an explicit
 //   [truncated] marker, so a large project cannot blow up token cost.
@@ -23,7 +23,7 @@ import type { AiWorkflow } from "./provider.ts";
 // - The prompt wraps tenant data in DATA BEGINS/ENDS delimiters and
 //   states that it is untrusted data, never instructions. This does
 //   not make prompt injection impossible — no delimiter does — but it
-//   is the required separation, and the evaluation framework (PRD 24)
+//   is the required separation, and the evaluation framework
 //   tests injection resistance explicitly.
 
 const MAX_MILESTONES = 20;
@@ -245,7 +245,7 @@ const SYSTEM_PROMPTS: Record<AiWorkflow, string> = {
     "[workflow:assistant] You answer questions about Nexora project data. Answer only from the data provided; if the data does not answer the question, say so.",
 };
 
-// Read-only accessor for the evaluation framework (PRD 24): a case
+// Read-only accessor for the evaluation framework: a case
 // can assert the prompt contract (e.g. the assistant's "say so when
 // the data does not answer" instruction) without the prompt text
 // being duplicated in tests.

@@ -21,10 +21,10 @@ interface RouteContext {
   params: Promise<{ organizationId: string }>;
 }
 
-// AI summarization (PRD 20): an authorized summary of one project.
+// AI summarization: an authorized summary of one project.
 // Read-only: no project data is created or changed. The summary is
 // labelled aiGenerated in the response, and the UI must render that
-// label (PRD 21). The provider call runs outside any transaction;
+// label. The provider call runs outside any transaction;
 // the execution record is started before it and completed after it
 // (see src/server/ai/execution.ts). Scope selects which section the
 // summary focuses on; the context is always the same authorized

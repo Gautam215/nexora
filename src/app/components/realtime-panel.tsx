@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-// Live project updates (PRD 25). A deliberately small surface: the
+// Live project updates. A deliberately small surface: the
 // panel opens the project's Server-Sent Events stream, shows the
 // connection state and who else has the project open, and when an
 // event arrives it offers a refresh instead of silently rewriting

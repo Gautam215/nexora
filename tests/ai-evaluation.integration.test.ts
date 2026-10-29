@@ -79,7 +79,7 @@ async function registerVerifyAndLogin(email: string, name: string, password: str
   return { cookie: `nexora_session=${cookie}` };
 }
 
-// PRD 24 evaluation, run against the mock provider. Every runnable
+// Evaluation, run against the mock provider. Every runnable
 // case is asserted; cases that need a live provider's judgement are
 // recorded as blocked, never as passes, so the summary cannot be
 // quoted as live-provider evidence.

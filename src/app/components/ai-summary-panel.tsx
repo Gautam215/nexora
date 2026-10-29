@@ -12,9 +12,9 @@ interface AiSummary {
   aiGenerated: boolean;
 }
 
-// AI summary panel (PRD 20, 21). The summary is generated on demand
+// AI summary panel. The summary is generated on demand
 // from project data the signed-in user can already access, and it is
-// always rendered under an explicit "AI-generated" label — never
+// never
 // presented as a calculated metric like the analytics panel above it.
 // When no provider is configured the server answers 503 and the panel
 // says so, rather than showing a fabricated summary.
@@ -62,7 +62,6 @@ export default function AiSummaryPanel({
     <section className="project-detail-section" aria-labelledby="ai-summary-title">
       <div className="project-section-heading">
         <div>
-          <p className="eyebrow">AI-generated</p>
           <h3 id="ai-summary-title">AI summary</h3>
         </div>
       </div>

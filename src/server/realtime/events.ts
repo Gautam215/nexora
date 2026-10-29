@@ -3,7 +3,7 @@ import { withOrganizationContext, type DatabaseTransaction } from "../db.ts";
 import { recordRealtimePublished } from "../metrics.ts";
 import { lockProjectTaskGraph } from "../project-work.ts";
 
-// Realtime events (PRD 25), v1 scope: project-channel events only.
+// Realtime events, v1 scope: project-channel events only.
 // notification.created is future work (see ARCHITECTURE.md):
 // notifications already have their own centre, and delivering them
 // over a stream needs a user-level channel decision. presence.changed

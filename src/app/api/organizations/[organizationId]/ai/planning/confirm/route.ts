@@ -30,7 +30,7 @@ type ConfirmResult =
   | { kind: "dependency_ambiguous"; title: string }
   | { kind: "dependency_cycle" };
 
-// AI project planning, step 2: confirm (PRD 18). Only this endpoint
+// AI project planning, step 2: confirm. Only this endpoint
 // creates anything, and only after the user reviewed the draft and
 // named the project. Everything happens in ONE transaction: project,
 // creator-as-manager membership, milestones, tasks, subtasks,

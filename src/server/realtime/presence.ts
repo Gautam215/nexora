@@ -1,4 +1,4 @@
-// Project presence (PRD 25, `presence.changed`): who currently has
+// Project presence (`presence.changed`): who currently has
 // the project's stream open. This is deliberately NOT part of the
 // durable event log in `events.ts`: connect/disconnect churn would
 // flood per-project versions, and presence is ephemeral state, not

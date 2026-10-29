@@ -3,7 +3,7 @@ import type { AiGenerateInput, AiGenerateOutput, AiProvider } from "./provider.t
 import { AiProviderError } from "./provider.ts";
 import { recordAiCircuitOpen } from "../metrics.ts";
 
-// AI provider circuit breaker (PRD 31: "circuit breaking", PRD 32).
+// AI provider circuit breaker.
 // The HTTP provider already retries a transient failure once; the
 // breaker covers the longer failure: a provider that keeps failing
 // across requests. After FAILURE_THRESHOLD consecutive provider
@@ -13,13 +13,13 @@ import { recordAiCircuitOpen } from "../metrics.ts";
 // failure reopens it for another cooldown. Non-provider errors
 // (bugs, not provider failures) never count toward the threshold.
 //
-// Deliberate limits, matching presence (PRD 25): the breaker is
+// Deliberate limits, matching presence: the breaker is
 // per-process state. On serverless each instance has its own
 // breaker, so one instance's open breaker does not stop another
 // instance's requests — that is acceptable for a fail-fast
 // optimization, because every instance still fails closed with
 // 503 AI_FAILED, and the application stays usable without AI
-// (PRD 41). The breaker never changes what a successful request
+// The breaker never changes what a successful request
 // returns; it only skips calls that would almost certainly fail.
 //
 // Observable: every open is counted (see recordAiCircuitOpen in

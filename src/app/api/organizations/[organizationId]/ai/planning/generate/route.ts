@@ -20,7 +20,7 @@ interface RouteContext {
   params: Promise<{ organizationId: string }>;
 }
 
-// AI project planning, step 1: generate (PRD 18). The provider
+// AI project planning, step 1: generate. The provider
 // returns a structured draft; this endpoint creates NOTHING. The
 // draft is returned for review, and only the confirm endpoint may
 // create milestones or tasks. The execution record is org-level

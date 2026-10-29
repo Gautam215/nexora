@@ -9,7 +9,7 @@ import { AiProviderError, parseAiJsonOutput, resolveAiProvider } from "../../../
 
 export const runtime = "nodejs";
 
-// AI meeting-notes extraction, step 1 of 2 (PRD 19): generates a
+// AI meeting-notes extraction, step 1 of 2: generates a
 // structured draft and creates NOTHING. The notes travel as the
 // untrusted-data block of the prompt, never as instructions, and the
 // draft is validated against the output schema before it is returned.

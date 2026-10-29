@@ -36,7 +36,7 @@ interface RouteContext {
   params: Promise<{ organizationId: string; projectId: string }>;
 }
 
-// Realtime project stream (PRD 25): Server-Sent Events over the
+// Realtime project stream: Server-Sent Events over the
 // existing HTTP stack — no new dependency, no WebSocket provider.
 // Authentication is the session cookie (EventSource sends cookies
 // same-origin); no CORS headers are emitted, so a cross-origin page

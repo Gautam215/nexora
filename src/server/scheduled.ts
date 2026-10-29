@@ -258,14 +258,14 @@ async function runCleanupJob(): Promise<string> {
   return `purged organization rows: ${organizations.rowCount ?? 0}, project rows: ${projects.rowCount ?? 0}, milestones: ${milestones.rowCount ?? 0}, task files: ${files.rowCount ?? 0}, file objects removed: ${objectsRemoved}, object removals failed: ${objectsFailed}`;
 }
 
-// Healing job (PRD 31: bounded operational auto-healing).
+// Healing job (bounded operational auto-healing).
 //
 // What this job does — one safe action, nothing else:
 //   - Purges expired sessions (nexora.purge_expired_sessions()).
 //     Expired sessions cannot authenticate, so deleting them
 //     changes no live session; it only stops the table growing.
 //
-// What it deliberately does NOT do (the PRD 31 forbidden list,
+// What it deliberately does NOT do (the forbidden list,
 // plus what this architecture cannot do safely):
 //   - No source-code, schema, permission, policy, or secret change.
 //   - No scheduled-claim recovery is needed here: a crashed job
@@ -278,7 +278,7 @@ async function runCleanupJob(): Promise<string> {
 //     already purged are owned by scripts/cleanup-task-files.mjs,
 //     which reports them; the job cannot invent their keys.
 //
-// The job's own properties (PRD 31: observable, bounded, rate
+// The job's own properties (observable, bounded, rate
 // limited, alerting-aware, manually overrideable):
 //   - Observable: one scheduled_job_runs row per day, status + detail.
 //   - Bounded: a single DELETE of already-expired rows; nothing else.

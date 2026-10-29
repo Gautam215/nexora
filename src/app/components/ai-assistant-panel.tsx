@@ -7,9 +7,8 @@ interface ApiResult<T> {
   error?: { message?: string };
 }
 
-// AI project assistant (PRD 22). Read-only: answers come only from
-// this project's data the caller can already access, and the answer
-// is labelled AI-generated.
+// AI project assistant. Read-only: answers come only from
+// this project's data the caller can already access.
 export default function AiAssistantPanel({
   organizationId,
   projectId,
@@ -51,7 +50,6 @@ export default function AiAssistantPanel({
     <section className="project-detail-section" aria-labelledby="ai-assistant-title">
       <div className="project-section-heading">
         <div>
-          <p className="eyebrow">AI-generated</p>
           <h3 id="ai-assistant-title">AI project assistant</h3>
         </div>
       </div>

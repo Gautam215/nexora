@@ -2,7 +2,7 @@ import "server-only";
 
 import { isAiCircuitBreakerDisabled, withAiCircuitBreaker } from "./circuit-breaker.ts";
 
-// AI provider abstraction (PRD 17, 23). No business logic calls a
+// AI provider abstraction. No business logic calls a
 // provider directly: routes call resolveAiProvider() and then
 // generate(), and every call is recorded by src/server/ai/execution.ts.
 //
@@ -22,7 +22,7 @@ import { isAiCircuitBreakerDisabled, withAiCircuitBreaker } from "./circuit-brea
 //   no route fabricates an AI answer when no provider is configured.
 //
 // Safety rules enforced here, not left to callers:
-// - 30-second timeout on every provider call (PRD 23 cost/latency
+// - 30-second timeout on every provider call (cost/latency
 //   control); a timeout is a provider failure, not a partial answer.
 // - Provider errors are mapped to AiProviderError codes. The client
 //   gets a generic message; provider status, body, and key are never
@@ -129,7 +129,7 @@ class MockAiProvider implements AiProvider {
     }
     // Summarization and assistant are free-text workflows.
     return {
-      text: "AI-generated summary (test provider): the project context was received and summarized.",
+      text: "Summary (test provider): the project context was received and summarized.",
       promptTokens: estimateTokens(input.system + input.user),
       completionTokens: 24,
     };
@@ -248,7 +248,7 @@ export function resolveAiProvider(): AiProvider | null {
     return null;
   }
   const httpProvider = new HttpAiProvider(model, baseUrl.href.replace(/\/$/, ""), apiKey);
-  // Circuit breaker (PRD 31): wraps only the real HTTP provider, never
+  // Circuit breaker: wraps only the real HTTP provider, never
   // the mock. Disabled by NEXORA_AI_CIRCUIT_BREAKER_DISABLED=1.
   return isAiCircuitBreakerDisabled() ? httpProvider : withAiCircuitBreaker(httpProvider);
 }

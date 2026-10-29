@@ -671,7 +671,7 @@ function ProjectAnalyticsPanel({
         </div>
         {analytics && <span className="analytics-as-of">As of {formatDate(analytics.as_of_date)}</span>}
       </div>
-      <p className="analytics-method-note">Calculated from project records. No AI-generated insights.</p>
+      <p className="analytics-method-note">Calculated from project records.</p>
 
       {loading && !analytics ? <p className="workspace-loading" role="status">Calculating project metrics...</p>
         : error && !analytics ? <p className="form-message form-error" role="alert">{error}</p>

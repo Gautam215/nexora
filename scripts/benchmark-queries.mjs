@@ -44,7 +44,7 @@ async function measure(name, sql, params, iterations = 20) {
   console.log(JSON.stringify({ query: name, ...summarize(samples) }));
 }
 
-// Concurrent phase (2026-10-28, PRD 39): the same query shapes,
+// Concurrent phase (2026-10-28): the same query shapes,
 // but with several workers issuing them at once, so the numbers
 // reflect contention, not just single-query cost. Each worker runs
 // its own sequential chain; latencies from all workers are pooled.

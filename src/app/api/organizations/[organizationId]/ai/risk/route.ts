@@ -21,7 +21,7 @@ interface RouteContext {
   params: Promise<{ organizationId: string }>;
 }
 
-// AI risk analysis (PRD 21): read-only. The context is retrieved
+// AI risk analysis: read-only. The context is retrieved
 // through the same tenant gates as summarization, and every finding
 // is labelled aiGenerated: a risk is a possibility, never a confirmed
 // fact, and the UI must render it that way.

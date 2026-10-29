@@ -1,4 +1,4 @@
-// AI evaluation framework (PRD 24). This module is the record format
+// AI evaluation framework. This module is the record format
 // and taxonomy for evaluation cases — it does not itself call a
 // provider. Cases run through the real routes in
 // tests/ai-evaluation.integration.test.ts, against the configured
@@ -6,7 +6,7 @@
 // version it was measured under, so a result is never quoted without
 // the conditions that produced it.
 //
-// Categories are PRD 24's, verbatim in intent: correctness,
+// Categories are verbatim in intent: correctness,
 // structured-output validity, authorization, prompt-injection
 // resistance, hallucination behaviour, safe failure, confirmation,
 // cost, and latency. A case that cannot run here (anything requiring

@@ -124,7 +124,7 @@ export async function PATCH(request: NextRequest, { params }: RouteContext) {
   }
 }
 
-// Member removal (PRD 6): an owner/admin removes another member, or a
+// Member removal: an owner/admin removes another member, or a
 // member leaves on their own. Owners cannot be removed by anyone else;
 // a sole owner cannot leave (the workspace would be orphaned).
 //

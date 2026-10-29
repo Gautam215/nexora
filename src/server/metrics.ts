@@ -40,7 +40,7 @@ let success = 0;
 let clientError = 0;
 let serverError = 0;
 
-// Realtime counters (PRD 25/33): connections are counted when a
+// Realtime counters: connections are counted when a
 // project stream is accepted and decremented when it closes, so
 // `current` is the live connection count for this process.
 // `delivered` counts events enqueued to a stream controller, not
@@ -62,7 +62,7 @@ let notificationConnectionsCurrent = 0;
 let notificationConnectionsTotal = 0;
 let notificationEventsDelivered = 0;
 
-// AI circuit-breaker openings (PRD 31): counted when the breaker
+// AI circuit-breaker openings: counted when the breaker
 // opens, never per rejected request, so the count is the number of
 // breaker trips, not the number of failed AI calls.
 let aiCircuitOpens = 0;

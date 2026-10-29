@@ -11,7 +11,7 @@ export const aiSummarizeSchema = z.strictObject({
   scope: aiSummaryScopeSchema.optional(),
 });
 
-// Meeting-notes summary input (PRD 20): free-text notes, same bounds
+// Meeting-notes summary input: free-text notes, same bounds
 // as the extraction input — a meeting has no project record, so this
 // workflow takes notes directly instead of a project id.
 export const aiMeetingSummarizeSchema = z.strictObject({

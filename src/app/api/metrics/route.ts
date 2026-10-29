@@ -99,7 +99,7 @@ export async function GET(request: NextRequest) {
   const probeStarted = Date.now();
   const databaseUp = await checkDatabaseConnection();
   const databaseLatencyMs = Date.now() - probeStarted;
-  // DB-backed operator aggregates (PRD 33: AI latency/tokens, queue
+  // DB-backed operator aggregates (AI latency/tokens, queue
   // depth, job failures). Null when migration 0061 has not been
   // applied yet or the database is unreachable: the in-memory
   // counters above are still served, and the null itself tells the

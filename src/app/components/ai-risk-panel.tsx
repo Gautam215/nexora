@@ -13,8 +13,8 @@ interface AiRisk {
   severity: "low" | "medium" | "high";
 }
 
-// AI risk analysis (PRD 21). Read-only: nothing is created or
-// changed. Every finding is labelled AI-generated and worded as a
+// AI risk analysis. Read-only: nothing is created or
+// changed. Every finding is worded as a
 // possibility, never as a confirmed fact.
 export default function AiRiskPanel({
   organizationId,
@@ -56,7 +56,6 @@ export default function AiRiskPanel({
     <section className="project-detail-section" aria-labelledby="ai-risk-title">
       <div className="project-section-heading">
         <div>
-          <p className="eyebrow">AI-generated</p>
           <h3 id="ai-risk-title">AI risk analysis</h3>
         </div>
       </div>

@@ -21,7 +21,7 @@ interface RouteContext {
   params: Promise<{ organizationId: string }>;
 }
 
-// AI project assistant (PRD 22): read-only question answering over
+// AI project assistant: read-only question answering over
 // one authorized project. Authorization runs BEFORE retrieval: the
 // context builder returns null for an invisible project, so the
 // provider never sees data the caller cannot access, and the whole

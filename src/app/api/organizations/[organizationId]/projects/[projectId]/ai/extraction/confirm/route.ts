@@ -32,7 +32,7 @@ interface RouteContext {
   params: Promise<{ organizationId: string; projectId: string }>;
 }
 
-// AI meeting-notes extraction, step 2 of 2 (PRD 19): creates the
+// AI meeting-notes extraction, step 2 of 2: creates the
 // reviewed draft's tasks in an existing project, in ONE transaction.
 // The caller must be able to work in the project (viewers are denied,
 // as with manual task creation) and the project must not be closed.
