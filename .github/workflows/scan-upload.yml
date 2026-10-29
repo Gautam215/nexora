@@ -40,8 +40,15 @@ jobs:
         with:
           path: /var/lib/clamav
           key: clamav-db-v1
+      # apt's clamav-freshclam daemon holds the freshclam log lock after
+      # install; stop it first or freshclam fails with
+      # "Resource temporarily unavailable".
       - name: Update signatures
-        run: sudo freshclam --quiet || sudo freshclam --quiet
+        run: |
+          sudo systemctl stop clamav-freshclam 2>/dev/null || true
+          sudo pkill -f freshclam 2>/dev/null || true
+          sleep 2
+          sudo freshclam --quiet || sudo freshclam --quiet
       - name: Download file
         env:
           SCAN_URL: ${{ github.event.client_payload.downloadUrl }}
