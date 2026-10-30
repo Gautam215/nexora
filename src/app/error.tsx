@@ -23,7 +23,7 @@ export default function RouteError({
           The page hit an unexpected error. Try again, or return to
           your workspaces and continue from there.
         </p>
-        <button type="button" onClick={() => reset()}><RefreshIcon />
+        <button className="primary-button" type="button" onClick={() => reset()}><RefreshIcon />
           Try again
         </button>{" "}
         <a href="/workspaces">Back to workspaces</a>

@@ -87,7 +87,7 @@ export default function RealtimePanel({
       {hasUpdate ? (
         <div>
           <p className="project-section-copy">This project changed. Refresh to see the latest work.</p>
-          <button type="button" onClick={() => window.location.reload()}><RefreshIcon />
+          <button className="quiet-button" type="button" onClick={() => window.location.reload()}><RefreshIcon />
             Refresh project
           </button>
         </div>

@@ -507,7 +507,7 @@ export default function ProjectPage({
                         ><TrashIcon />
                           {pending === "delete" ? "Deleting..." : "Delete this project"}
                         </button>
-                        <button type="button" onClick={() => setConfirmDelete(false)} disabled={Boolean(pending)}><XIcon />
+                        <button className="quiet-button" type="button" onClick={() => setConfirmDelete(false)} disabled={Boolean(pending)}><XIcon />
                           Keep project
                         </button>
                       </div>

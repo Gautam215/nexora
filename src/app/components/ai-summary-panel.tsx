@@ -94,7 +94,7 @@ export default function AiSummaryPanel({
           {error}
         </p>
       ) : null}
-      <button type="button" onClick={generateSummary} disabled={pending}><SparklesIcon />
+      <button className="primary-button" type="button" onClick={generateSummary} disabled={pending}><SparklesIcon />
         {pending ? "Generating summary…" : summary ? "Regenerate summary" : "Generate AI summary"}
       </button>
     </section>

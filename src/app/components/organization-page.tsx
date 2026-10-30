@@ -311,7 +311,7 @@ export default function OrganizationPage({ organizationId }: { organizationId: s
                         ><TrashIcon />
                           {deletePending ? "Deleting..." : "Delete this workspace"}
                         </button>
-                        <button
+                        <button className="quiet-button"
                           type="button"
                           disabled={deletePending}
                           onClick={() => {

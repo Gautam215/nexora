@@ -74,6 +74,15 @@ export default function WorkspacePage({ mode }: WorkspacePageProps) {
     };
   }, [mode]);
 
+  // Workspaces-only dark background: hide the shared blue body layers while
+  // this page is mounted (same pattern as the login bloom body class).
+  useEffect(() => {
+    document.body.classList.add("workspaces-dark-bg");
+    return () => {
+      document.body.classList.remove("workspaces-dark-bg");
+    };
+  }, []);
+
   async function createWorkspace(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPending(true);
@@ -121,6 +130,16 @@ export default function WorkspacePage({ mode }: WorkspacePageProps) {
 
   return (
     <main className="auth-layout workspace-layout">
+      <div className="ws-bg" aria-hidden="true">
+        <div className="ws-bg-base" />
+        <div className="ws-bg-streak ws-bg-streak-1" />
+        <div className="ws-bg-streak ws-bg-streak-2" />
+        <div className="ws-bg-streak ws-bg-streak-3" />
+        <div className="ws-bg-streak ws-bg-streak-4" />
+        <div className="ws-bg-streak ws-bg-streak-5" />
+        <div className="ws-bg-dots" />
+        <div className="ws-bg-highlight" />
+      </div>
       <aside className="auth-story">
         <BrandLogo href="/workspaces" />
         <div className="auth-story-copy">

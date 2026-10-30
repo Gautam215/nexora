@@ -133,7 +133,7 @@ export default function AiPlanningPanel({ organizationId }: { organizationId: st
           required
         />
       </label>
-      <button type="button" onClick={generatePlan} disabled={pending !== "" || goal.trim().length < 10}><SparklesIcon />
+      <button className="primary-button" type="button" onClick={generatePlan} disabled={pending !== "" || goal.trim().length < 10}><SparklesIcon />
         {pending === "generate" ? "Generating plan…" : "Generate plan"}
       </button>
       {draft ? (
@@ -176,7 +176,7 @@ export default function AiPlanningPanel({ organizationId }: { organizationId: st
               required
             />
           </label>
-          <button
+          <button className="primary-button"
             type="button"
             onClick={confirmPlan}
             disabled={pending !== "" || projectName.trim().length === 0}

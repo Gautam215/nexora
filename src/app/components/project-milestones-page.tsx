@@ -430,7 +430,7 @@ export default function ProjectMilestonesPage({
                                 ><TrashIcon />
                                   {pending === `delete-${milestone.id}` ? "Deleting..." : "Delete this milestone"}
                                 </button>
-                                <button
+                                <button className="quiet-button"
                                   type="button"
                                   disabled={Boolean(pending)}
                                   onClick={() => setDeleteTarget(null)}

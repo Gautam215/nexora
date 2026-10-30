@@ -140,7 +140,7 @@ export default function AiExtractionPanel({
           required
         />
       </label>
-      <button type="button" onClick={generateDraft} disabled={pending !== "" || notes.trim().length < 10}><SparklesIcon />
+      <button className="primary-button" type="button" onClick={generateDraft} disabled={pending !== "" || notes.trim().length < 10}><SparklesIcon />
         {pending === "generate" ? "Extracting…" : "Extract tasks"}
       </button>
       {draft ? (
@@ -188,7 +188,7 @@ export default function AiExtractionPanel({
               </ul>
             </>
           ) : null}
-          <button type="button" onClick={confirmDraft} disabled={pending !== ""}><SparklesIcon />
+          <button className="primary-button" type="button" onClick={confirmDraft} disabled={pending !== ""}><SparklesIcon />
             {pending === "confirm" ? "Creating tasks…" : "Create tasks from draft"}
           </button>
         </div>

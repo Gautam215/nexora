@@ -64,7 +64,7 @@ export default function AiRiskPanel({
         Possible risks for this project — possibilities, not confirmed facts. Review them against the actual work
         before acting.
       </p>
-      <button type="button" onClick={analyze} disabled={pending}><SparklesIcon />
+      <button className="primary-button" type="button" onClick={analyze} disabled={pending}><SparklesIcon />
         {pending ? "Analyzing…" : risks ? "Refresh analysis" : "Analyze risks"}
       </button>
       {risks ? (
