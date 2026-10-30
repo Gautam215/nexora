@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { BrandLogo } from "./brand-logo";
 import BreathBloom from "./breath-bloom";
 
@@ -55,6 +55,17 @@ export default function AuthPage({ mode, nextPath }: AuthPageProps) {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [verified, setVerified] = useState(false);
   const isVerificationPage = mode === "verify-email";
+
+  // Login only: the flower replaces the site-wide wave background, so the
+  // wave layers hide while this page is mounted (globals.css scopes the
+  // hiding to `body.login-bloom`, which this effect owns).
+  useEffect(() => {
+    if (mode !== "login") return;
+    document.body.classList.add("login-bloom");
+    return () => {
+      document.body.classList.remove("login-bloom");
+    };
+  }, [mode]);
   const { title, copy } = isVerificationPage
     ? { title: verified ? "Email confirmed." : "Confirm your email.", copy: "This one-time link verifies the address on your account." }
     : pageCopy[mode];

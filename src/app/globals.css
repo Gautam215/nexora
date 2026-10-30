@@ -4031,12 +4031,31 @@ h1 {
   inset: 0;
   pointer-events: none;
 }
-.bloom-glow,
+.bloom-glow {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(var(--bloom-size, 100px) * 6);
+  height: calc(var(--bloom-size, 100px) * 6);
+  border-radius: 9999px;
+  /* SSR fallback for the default preset: the site CSP blocks inline style
+     attributes, so a petal or glow painted only by an inline style never
+     shows until hydration re-applies it. The component's inline background
+     still wins after hydration, so other presets keep their colours. */
+  background: radial-gradient(circle, oklch(0.6061 0.2122 260.66 / 0.35), transparent 62%);
+}
 .bloom-petal {
   position: absolute;
   left: 50%;
   top: 50%;
+  width: calc(var(--bloom-size, 100px) * 1);
+  height: calc(var(--bloom-size, 100px) * 1);
+  margin: calc(var(--bloom-size, 100px) * -0.5) 0 0 calc(var(--bloom-size, 100px) * -0.5);
   border-radius: 9999px;
+  /* SSR fallback, same reason as .bloom-glow. */
+  background: radial-gradient(circle at 50% 0%, oklch(0.1186 0.0248 260.66), oklch(0.3133 0.1419 260.73), oklch(0.6061 0.2122 260.66));
+  mix-blend-mode: lighten;
+  transform-origin: center;
 }
 .bloom-guide {
   position: absolute;
@@ -4103,5 +4122,14 @@ h1 {
   z-index: 1;
 }
 .auth-layout--bloom .auth-story::after {
+  display: none;
+}
+
+/* Login page only: the flower replaces the site-wide wave background, so
+   the wave layers hide while the login page is mounted (AuthPage adds
+   `login-bloom` to <body> for login mode and removes it on unmount). */
+body.login-bloom::before,
+body.login-bloom::after,
+body.login-bloom .liquid-wave-background {
   display: none;
 }
