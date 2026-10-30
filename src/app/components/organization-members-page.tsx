@@ -210,7 +210,7 @@ export default function OrganizationMembersPage({
   return (
     <main className="auth-layout workspace-layout">
       <aside className="auth-story">
-        <BrandLogo />
+        <BrandLogo href="/workspaces" />
         <div className="auth-story-copy">
           <p className="eyebrow">People and permissions</p>
           <h1>Give access with intention.</h1>

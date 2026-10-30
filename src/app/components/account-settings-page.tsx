@@ -469,7 +469,7 @@ export default function AccountSettingsPage() {
   return (
     <main className="auth-layout">
       <aside className="auth-story">
-        <BrandLogo />
+        <BrandLogo href="/workspaces" />
         <div className="auth-story-copy">
           <p className="eyebrow">Account security</p>
           <h1>Keep your account in your hands.</h1>

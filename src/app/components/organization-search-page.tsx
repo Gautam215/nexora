@@ -97,7 +97,7 @@ export default function OrganizationSearchPage({ organizationId }: { organizatio
   return (
     <main className="auth-layout workspace-layout">
       <aside className="auth-story">
-        <BrandLogo />
+        <BrandLogo href="/workspaces" />
         <div className="auth-story-copy">
           <p className="eyebrow">Workspace search</p>
           <h1>Find the detail that moves work forward.</h1>

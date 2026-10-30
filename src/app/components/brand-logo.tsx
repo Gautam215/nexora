@@ -1,8 +1,18 @@
 import { NEXORA_LOGO_SRC } from "./nexora-logo-data";
 
-export function BrandLogo({ logoClassName = "brand-logo" }: { logoClassName?: string }) {
+export function BrandLogo({
+  logoClassName = "brand-logo",
+  href = "/",
+}: {
+  logoClassName?: string;
+  href?: string;
+}) {
   return (
-    <a className="brand" href="/" aria-label="Nexora home">
+    <a
+      className="brand"
+      href={href}
+      aria-label={href === "/workspaces" ? "Nexora workspaces" : "Nexora home"}
+    >
       <img className={logoClassName} src={NEXORA_LOGO_SRC} alt="" />
     </a>
   );

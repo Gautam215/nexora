@@ -121,7 +121,7 @@ export default function WorkspacePage({ mode }: WorkspacePageProps) {
   return (
     <main className="auth-layout workspace-layout">
       <aside className="auth-story">
-        <BrandLogo />
+        <BrandLogo href="/workspaces" />
         <div className="auth-story-copy">
           <p className="eyebrow">A good place to start</p>
           <h1>Bring your team into focus.</h1>

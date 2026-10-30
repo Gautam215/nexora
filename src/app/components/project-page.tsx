@@ -342,7 +342,7 @@ export default function ProjectPage({
   return (
     <main className="auth-layout workspace-layout">
       <aside className="auth-story">
-        <BrandLogo />
+        <BrandLogo href="/workspaces" />
         <div className="auth-story-copy">
           <p className="eyebrow">Project workspace</p>
           <h1>Make progress visible.</h1>

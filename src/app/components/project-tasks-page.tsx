@@ -500,7 +500,7 @@ export default function ProjectTasksPage({
   return (
     <main className="auth-layout workspace-layout">
       <aside className="auth-story">
-        <BrandLogo />
+        <BrandLogo href="/workspaces" />
         <div className="auth-story-copy">
           <p className="eyebrow">Project execution</p>
           <h1>Turn commitments into the next clear action.</h1>

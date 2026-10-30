@@ -86,7 +86,7 @@ export default function OrganizationPage({ organizationId }: { organizationId: s
   return (
     <main className="auth-layout workspace-layout">
       <aside className="auth-story">
-        <BrandLogo />
+        <BrandLogo href="/workspaces" />
         <div className="auth-story-copy">
           <p className="eyebrow">Workspace boundary</p>
           <h1>Keep the right work together.</h1>

@@ -211,7 +211,7 @@ export default function ProjectMilestonesPage({
   return (
     <main className="auth-layout workspace-layout">
       <aside className="auth-story">
-        <BrandLogo />
+        <BrandLogo href="/workspaces" />
         <div className="auth-story-copy">
           <p className="eyebrow">Project planning</p>
           <h1>Make the next finish line clear.</h1>
