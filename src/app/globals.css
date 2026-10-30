@@ -3240,7 +3240,8 @@ h1 {
   font-size: 9px;
 }
 
-.task-file-scan-warning {
+.task-file-info .task-file-scan-warning,
+.task-file-actions .task-file-scan-warning {
   color: #ff453a;
 }
 
