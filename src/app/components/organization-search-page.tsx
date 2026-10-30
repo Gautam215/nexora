@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { SearchEntityType } from "../../security/search-schemas.ts";
 import { BrandLogo } from "./brand-logo";
+import { ChevronLeftIcon, ChevronRightIcon, SearchIcon } from "./button-icons";
 
 interface SearchResult {
   entity_type: SearchEntityType;
@@ -148,7 +149,7 @@ export default function OrganizationSearchPage({ organizationId }: { organizatio
                 <option value="file">Files</option>
               </select>
             </label>
-            <button className="primary-button search-submit" type="submit" disabled={loading}>
+            <button className="primary-button search-submit" type="submit" disabled={loading}><SearchIcon />
               {loading ? "Searching..." : "Search"}
             </button>
             <p id="search-hint" className="search-hint">Use 2-120 characters. Search is limited to 20 matches per page.</p>
@@ -197,7 +198,7 @@ export default function OrganizationSearchPage({ organizationId }: { organizatio
                   type="button"
                   onClick={() => setPage((current) => Math.max(0, current - 1))}
                   disabled={page === 0 || loading}
-                >
+                ><ChevronLeftIcon />
                   Previous
                 </button>
                 <span>Page {page + 1}</span>
@@ -206,7 +207,7 @@ export default function OrganizationSearchPage({ organizationId }: { organizatio
                   type="button"
                   onClick={() => setPage((current) => current + 1)}
                   disabled={(page + 1) * PAGE_SIZE >= total || loading}
-                >
+                ><ChevronRightIcon />
                   Next
                 </button>
               </nav>

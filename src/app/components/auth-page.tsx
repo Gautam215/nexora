@@ -3,6 +3,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { BrandLogo } from "./brand-logo";
 import BreathBloom from "./breath-bloom";
+import { ArrowRightIcon, CheckIcon } from "./button-icons";
 
 // Login only: the bloom paints its own petals, so it needs no page background.
 const LOGIN_BLOOM_PARAMS = { background: "transparent" };
@@ -205,7 +206,7 @@ export default function AuthPage({ mode, nextPath }: AuthPageProps) {
 
           {isVerificationPage ? (
             <div className="auth-actions">
-              <button className="primary-button" type="button" onClick={confirmEmail} disabled={pending || verified}>
+              <button className="primary-button" type="button" onClick={confirmEmail} disabled={pending || verified}><CheckIcon />
                 {pending ? "Confirming..." : verified ? "Email confirmed" : "Confirm email"}
               </button>
               {!verified && <p className="form-hint">The link is single-use and expires after two hours.</p>}
@@ -257,7 +258,7 @@ export default function AuthPage({ mode, nextPath }: AuthPageProps) {
                 </label>
               )}
 
-              <button className="primary-button" type="submit" disabled={pending}>
+              <button className="primary-button" type="submit" disabled={pending}><ArrowRightIcon />
                 {pending ? "Please wait..." : submitLabel(mode)}
               </button>
             </form>

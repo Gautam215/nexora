@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import ProjectWorkNav from "./project-work-nav";
+import { ChevronDownIcon } from "./button-icons";
 
 interface ActivityEvent {
   id: string;
@@ -118,7 +119,7 @@ export default function ProjectActivityPage({
               ) : <p className="workspace-note">No activity has been recorded yet.</p>}
           {error && events.length > 0 && <p className="form-message form-error" role="alert">{error}</p>}
           {hasMore && (
-            <button className="quiet-button activity-load-more" type="button" onClick={() => void loadMore()} disabled={loadingMore}>
+            <button className="quiet-button activity-load-more" type="button" onClick={() => void loadMore()} disabled={loadingMore}><ChevronDownIcon />
               {loadingMore ? "Loading..." : "Load older activity"}
             </button>
           )}

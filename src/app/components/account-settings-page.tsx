@@ -8,6 +8,7 @@ import {
   validatePasswordChange,
 } from "./account-settings-helpers.ts";
 import { BrandLogo } from "./brand-logo";
+import { CheckIcon, ChevronLeftIcon, DownloadIcon, KeyIcon, RefreshIcon, ShieldIcon, SignInIcon, SignOutIcon, TrashIcon, XIcon } from "./button-icons";
 
 interface SessionUser {
   displayName: string;
@@ -485,7 +486,7 @@ export default function AccountSettingsPage() {
         <div className="workspace-card account-card">
           <div className="workspace-topline">
             <span className="auth-kicker">Your Nexora</span>
-            <a className="quiet-button" href="/workspaces">Back to workspaces</a>
+            <a className="quiet-button" href="/workspaces"><ChevronLeftIcon />Back to workspaces</a>
           </div>
           <p className="eyebrow workspace-greeting">
             {user ? `Signed in as ${user.displayName}` : "Account security"}
@@ -542,7 +543,7 @@ export default function AccountSettingsPage() {
                       required
                     />
                   </label>
-                  <button className="primary-button" type="submit" disabled={passwordPending}>
+                  <button className="primary-button" type="submit" disabled={passwordPending}><KeyIcon />
                     {passwordPending ? "Updating..." : "Update password"}
                   </button>
                 </form>
@@ -566,7 +567,7 @@ export default function AccountSettingsPage() {
                 {sessionsError && (
                   <p className="form-message form-error" role="alert">
                     {sessionsError}{" "}
-                    <button className="quiet-button" type="button" onClick={() => void loadSessions()}>
+                    <button className="quiet-button" type="button" onClick={() => void loadSessions()}><RefreshIcon />
                       Try again
                     </button>
                   </p>
@@ -580,7 +581,7 @@ export default function AccountSettingsPage() {
                   <div className="workspace-empty">
                     <h3>No active sessions found.</h3>
                     <p>Sign in again if you were signed out.</p>
-                    <a className="primary-button button-link" href="/login">Sign in</a>
+                    <a className="primary-button button-link" href="/login"><SignInIcon />Sign in</a>
                   </div>
                 ) : (
                   <ul className="session-list">
@@ -626,7 +627,7 @@ export default function AccountSettingsPage() {
                                 autoFocus
                                 onClick={() => void revokeSession(session.id)}
                                 disabled={revokePending}
-                              >
+                              ><SignOutIcon />
                                 {revokePending ? "Signing out..." : "Sign out session"}
                               </button>
                               <button
@@ -637,7 +638,7 @@ export default function AccountSettingsPage() {
                                   setConfirmRevokeId(null);
                                 }}
                                 disabled={revokePending}
-                              >
+                              ><XIcon />
                                 Keep session
                               </button>
                             </div>
@@ -647,7 +648,7 @@ export default function AccountSettingsPage() {
                             className="quiet-button"
                             type="button"
                             onClick={() => setConfirmRevokeId(session.id)}
-                          >
+                          ><SignOutIcon />
                             Sign out
                           </button>
                         )}
@@ -670,7 +671,7 @@ export default function AccountSettingsPage() {
                             autoFocus
                             onClick={() => void revokeOthers()}
                             disabled={revokePending}
-                          >
+                          ><SignOutIcon />
                             {revokePending ? "Signing out..." : "Sign out other sessions"}
                           </button>
                           <button
@@ -681,7 +682,7 @@ export default function AccountSettingsPage() {
                               setConfirmRevokeOthers(false);
                             }}
                             disabled={revokePending}
-                          >
+                          ><XIcon />
                             Cancel
                           </button>
                         </div>
@@ -692,7 +693,7 @@ export default function AccountSettingsPage() {
                         type="button"
                         ref={revokeOthersTriggerRef}
                         onClick={() => setConfirmRevokeOthers(true)}
-                      >
+                      ><SignOutIcon />
                         Sign out all other sessions
                       </button>
                     )}
@@ -722,7 +723,7 @@ export default function AccountSettingsPage() {
                     <p>Authenticator is enabled.</p>
                     {!totpShowDisable ? (
                       <div className="confirm-actions">
-                        <button className="quiet-button" type="button" onClick={() => setTotpShowDisable(true)} disabled={totpPending}>
+                        <button className="quiet-button" type="button" onClick={() => setTotpShowDisable(true)} disabled={totpPending}><ShieldIcon />
                           Disable authenticator
                         </button>
                       </div>
@@ -750,10 +751,10 @@ export default function AccountSettingsPage() {
                           />
                         </label>
                         <div className="confirm-actions">
-                          <button className="danger-button" type="submit" disabled={totpPending}>
+                          <button className="danger-button" type="submit" disabled={totpPending}><ShieldIcon />
                             {totpPending ? "Disabling..." : "Disable authenticator"}
                           </button>
-                          <button className="quiet-button" type="button" onClick={() => setTotpShowDisable(false)} disabled={totpPending}>
+                          <button className="quiet-button" type="button" onClick={() => setTotpShowDisable(false)} disabled={totpPending}><XIcon />
                             Cancel
                           </button>
                         </div>
@@ -774,7 +775,7 @@ export default function AccountSettingsPage() {
                           alt="Authenticator setup QR code"
                         />
                         <div className="confirm-actions">
-                          <button className="quiet-button" type="button" onClick={() => setTotpShowManual(true)} disabled={totpPending}>
+                          <button className="quiet-button" type="button" onClick={() => setTotpShowManual(true)} disabled={totpPending}><KeyIcon />
                             Use a setup code instead
                           </button>
                         </div>
@@ -795,7 +796,7 @@ export default function AccountSettingsPage() {
                         </p>
                         {totpSetup.qrSvg && (
                           <div className="confirm-actions">
-                            <button className="quiet-button" type="button" onClick={() => setTotpShowManual(false)} disabled={totpPending}>
+                            <button className="quiet-button" type="button" onClick={() => setTotpShowManual(false)} disabled={totpPending}><ChevronLeftIcon />
                               Back to QR code
                             </button>
                           </div>
@@ -815,10 +816,10 @@ export default function AccountSettingsPage() {
                       />
                     </label>
                     <div className="confirm-actions">
-                      <button className="primary-button" type="submit" disabled={totpPending}>
+                      <button className="primary-button" type="submit" disabled={totpPending}><CheckIcon />
                         {totpPending ? "Verifying..." : "Verify and enable"}
                       </button>
-                      <button className="quiet-button" type="button" onClick={() => { setTotpSetup(null); setTotpAppChoice(null); setTotpShowManual(false); }} disabled={totpPending}>
+                      <button className="quiet-button" type="button" onClick={() => { setTotpSetup(null); setTotpAppChoice(null); setTotpShowManual(false); }} disabled={totpPending}><XIcon />
                         Cancel setup
                       </button>
                     </div>
@@ -827,10 +828,10 @@ export default function AccountSettingsPage() {
                   <div>
                     <p>Which authenticator app will you use?</p>
                     <div className="confirm-actions">
-                      <button className="quiet-button" type="button" onClick={() => void startTotpSetup("google")} disabled={totpPending}>
+                      <button className="quiet-button" type="button" onClick={() => void startTotpSetup("google")} disabled={totpPending}><ShieldIcon />
                         {totpPending ? "Starting setup..." : "Google Authenticator"}
                       </button>
-                      <button className="quiet-button" type="button" onClick={() => void startTotpSetup("microsoft")} disabled={totpPending}>
+                      <button className="quiet-button" type="button" onClick={() => void startTotpSetup("microsoft")} disabled={totpPending}><ShieldIcon />
                         {totpPending ? "Starting setup..." : "Microsoft Authenticator"}
                       </button>
                     </div>
@@ -850,7 +851,7 @@ export default function AccountSettingsPage() {
                 {exportSuccess && (
                   <p className="form-message form-success" role="status" aria-live="polite">{exportSuccess}</p>
                 )}
-                <button className="quiet-button" type="button" onClick={() => void exportData()} disabled={exportPending}>
+                <button className="quiet-button" type="button" onClick={() => void exportData()} disabled={exportPending}><DownloadIcon />
                   {exportPending ? "Preparing export..." : "Download my data"}
                 </button>
                 <p className="account-section-copy">
@@ -902,16 +903,16 @@ export default function AccountSettingsPage() {
                       </label>
                     )}
                     <div className="confirm-actions">
-                      <button className="danger-button" type="submit" disabled={deletePending}>
+                      <button className="danger-button" type="submit" disabled={deletePending}><TrashIcon />
                         {deletePending ? "Deleting..." : "Delete my account"}
                       </button>
-                      <button className="quiet-button" type="button" onClick={() => setConfirmDeleteAccount(false)} disabled={deletePending}>
+                      <button className="quiet-button" type="button" onClick={() => setConfirmDeleteAccount(false)} disabled={deletePending}><XIcon />
                         Keep my account
                       </button>
                     </div>
                   </form>
                 ) : (
-                  <button className="danger-button" type="button" onClick={() => setConfirmDeleteAccount(true)}>
+                  <button className="danger-button" type="button" onClick={() => setConfirmDeleteAccount(true)}><TrashIcon />
                     Delete my account
                   </button>
                 )}

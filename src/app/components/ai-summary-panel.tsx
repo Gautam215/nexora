@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { SparklesIcon } from "./button-icons";
 
 interface ApiResult<T> {
   data?: T;
@@ -93,7 +94,7 @@ export default function AiSummaryPanel({
           {error}
         </p>
       ) : null}
-      <button type="button" onClick={generateSummary} disabled={pending}>
+      <button type="button" onClick={generateSummary} disabled={pending}><SparklesIcon />
         {pending ? "Generating summary…" : summary ? "Regenerate summary" : "Generate AI summary"}
       </button>
     </section>

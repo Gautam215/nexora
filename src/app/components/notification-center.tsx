@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { NOTIFICATION_EVENT_TYPES } from "../../security/notification-schemas.ts";
+import { ChevronDownIcon, MailIcon } from "./button-icons";
 
 type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPES)[number];
 
@@ -219,14 +220,14 @@ export default function NotificationCenter({ organizationId }: { organizationId:
                           <small>{notification.project_name} · {notification.actor_name || "Project member"} · {formatDateTime(notification.created_at)}</small>
                         </span>
                       </a>
-                      <button className="quiet-button" type="button" disabled={pending === notification.id} onClick={() => void setRead(notification, !notification.read_at)}>
+                      <button className="quiet-button" type="button" disabled={pending === notification.id} onClick={() => void setRead(notification, !notification.read_at)}><MailIcon />
                         {notification.read_at ? "Mark unread" : "Mark read"}
                       </button>
                     </li>
                   ))}
                 </ol>
               ) : <p className="workspace-note">You are all caught up.</p>}
-            {hasMore && <button className="quiet-button notification-load-more" type="button" onClick={() => void loadMore()} disabled={Boolean(pending)}>{pending === "more" ? "Loading..." : "Load older"}</button>}
+            {hasMore && <button className="quiet-button notification-load-more" type="button" onClick={() => void loadMore()} disabled={Boolean(pending)}><ChevronDownIcon />{pending === "more" ? "Loading..." : "Load older"}</button>}
           </section>
         </section>
       </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { SparklesIcon } from "./button-icons";
 
 interface ApiResult<T> {
   data?: T;
@@ -132,7 +133,7 @@ export default function AiPlanningPanel({ organizationId }: { organizationId: st
           required
         />
       </label>
-      <button type="button" onClick={generatePlan} disabled={pending !== "" || goal.trim().length < 10}>
+      <button type="button" onClick={generatePlan} disabled={pending !== "" || goal.trim().length < 10}><SparklesIcon />
         {pending === "generate" ? "Generating plan…" : "Generate plan"}
       </button>
       {draft ? (
@@ -179,7 +180,7 @@ export default function AiPlanningPanel({ organizationId }: { organizationId: st
             type="button"
             onClick={confirmPlan}
             disabled={pending !== "" || projectName.trim().length === 0}
-          >
+          ><SparklesIcon />
             {pending === "confirm" ? "Creating project…" : "Create project from plan"}
           </button>
         </div>

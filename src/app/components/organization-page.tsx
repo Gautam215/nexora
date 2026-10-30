@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import AiPlanningPanel from "./ai-planning-panel";
 import OrganizationProjects from "./organization-projects";
 import { BrandLogo } from "./brand-logo";
+import { CheckIcon, TrashIcon, UsersIcon, XIcon } from "./button-icons";
 
 interface Organization {
   id: string;
@@ -126,7 +127,7 @@ export default function OrganizationPage({ organizationId }: { organizationId: s
                 <a
                   className="primary-button button-link"
                   href={`/organizations/${encodeURIComponent(organization.id)}/members`}
-                >
+                ><UsersIcon />
                   Manage team access
                 </a>
               )}
@@ -206,7 +207,7 @@ export default function OrganizationPage({ organizationId }: { organizationId: s
                     </p>
                   )}
                   <div className="auth-actions">
-                    <button className="primary-button" type="submit" disabled={settingsPending}>
+                    <button className="primary-button" type="submit" disabled={settingsPending}><CheckIcon />
                       {settingsPending ? "Saving..." : "Save settings"}
                     </button>
                   </div>
@@ -307,7 +308,7 @@ export default function OrganizationPage({ organizationId }: { organizationId: s
                               setDeletePending(false);
                             }
                           }}
-                        >
+                        ><TrashIcon />
                           {deletePending ? "Deleting..." : "Delete this workspace"}
                         </button>
                         <button
@@ -319,7 +320,7 @@ export default function OrganizationPage({ organizationId }: { organizationId: s
                             setDeleteTotpCode("");
                             setDeleteError("");
                           }}
-                        >
+                        ><XIcon />
                           Keep workspace
                         </button>
                       </div>
@@ -329,7 +330,7 @@ export default function OrganizationPage({ organizationId }: { organizationId: s
                       className="danger-button"
                       type="button"
                       onClick={() => setConfirmDelete(true)}
-                    >
+                    ><TrashIcon />
                       Delete workspace
                     </button>
                   )}

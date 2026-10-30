@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { SparklesIcon } from "./button-icons";
 
 interface ApiResult<T> {
   data?: T;
@@ -67,7 +68,7 @@ export default function AiAssistantPanel({
           required
         />
       </label>
-      <button type="button" onClick={ask} disabled={pending || question.trim().length === 0}>
+      <button type="button" onClick={ask} disabled={pending || question.trim().length === 0}><SparklesIcon />
         {pending ? "Answering…" : "Ask"}
       </button>
       {answer ? <p className="project-section-copy">{answer}</p> : null}

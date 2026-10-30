@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { BrandLogo } from "./brand-logo";
+import { SendIcon, ShieldIcon, SignOutIcon, TrashIcon } from "./button-icons";
 
 interface Member {
   user_id: string;
@@ -251,7 +252,7 @@ export default function OrganizationMembersPage({
                       <option value="guest">Guest</option>
                     </select>
                   </label>
-                  <button className="primary-button" type="submit" disabled={Boolean(pending)}>
+                  <button className="primary-button" type="submit" disabled={Boolean(pending)}><SendIcon />
                     {pending === "invite" ? "Sending..." : "Send invitation"}
                   </button>
                 </form>
@@ -291,7 +292,7 @@ export default function OrganizationMembersPage({
                               onClick={() => void updateMember(member.user_id, {
                                 status: member.status === "active" ? "disabled" : "active",
                               })}
-                            >
+                            ><ShieldIcon />
                               {member.status === "active" ? "Disable" : "Restore"}
                             </button>
                             <button
@@ -299,7 +300,7 @@ export default function OrganizationMembersPage({
                               type="button"
                               disabled={busy || Boolean(pending)}
                               onClick={() => void removeMember(member.user_id, false)}
-                            >
+                            ><TrashIcon />
                               {confirmRemove === member.user_id ? "Confirm remove?" : "Remove"}
                             </button>
                           </div>
@@ -310,7 +311,7 @@ export default function OrganizationMembersPage({
                               type="button"
                               disabled={busy || Boolean(pending)}
                               onClick={() => void removeMember(member.user_id, true)}
-                            >
+                            ><SignOutIcon />
                               {confirmRemove === member.user_id ? "Confirm leave?" : "Leave workspace"}
                             </button>
                           </div>
@@ -341,7 +342,7 @@ export default function OrganizationMembersPage({
                               type="button"
                               disabled={Boolean(pending)}
                               onClick={() => void revokeInvite(invitation.id)}
-                            >
+                            ><TrashIcon />
                               Revoke
                             </button>
                           </article>

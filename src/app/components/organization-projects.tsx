@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import type { ProjectStatus } from "../../security/project-status.ts";
+import { ChevronDownIcon, PlusIcon } from "./button-icons";
 
 interface ProjectSummary {
   id: string;
@@ -168,7 +169,7 @@ export default function OrganizationProjects({
               setShowForm((visible) => !visible);
               setError("");
             }}
-          >
+          ><PlusIcon />
             {showForm ? "Close" : "New project"}
           </button>
         )}
@@ -221,7 +222,7 @@ export default function OrganizationProjects({
             />
           </label>
           <div className="project-form-actions project-field-wide">
-            <button className="primary-button" type="submit" disabled={pending}>
+            <button className="primary-button" type="submit" disabled={pending}><PlusIcon />
               {pending ? "Creating..." : "Create project"}
             </button>
             <span className="workspace-note">You’ll be added as this project’s manager.</span>
@@ -278,7 +279,7 @@ export default function OrganizationProjects({
           type="button"
           onClick={() => void loadMore()}
           disabled={loadingMore}
-        >
+        ><ChevronDownIcon />
           {loadingMore ? "Loading..." : "Load more projects"}
         </button>
       )}

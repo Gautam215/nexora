@@ -8,6 +8,7 @@ import {
 } from "../../security/milestone-status.ts";
 import ProjectWorkNav from "./project-work-nav";
 import { BrandLogo } from "./brand-logo";
+import { CheckIcon, PlusIcon, TrashIcon, XIcon } from "./button-icons";
 
 interface MilestoneDependency {
   id: string;
@@ -277,7 +278,7 @@ export default function ProjectMilestonesPage({
                   </fieldset>
                 )}
                 <div className="project-form-actions milestone-field-wide">
-                  <button className="primary-button" type="submit" disabled={Boolean(pending)}>
+                  <button className="primary-button" type="submit" disabled={Boolean(pending)}><PlusIcon />
                     {pending === "create" ? "Creating..." : "Create milestone"}
                   </button>
                   <span className="workspace-note">Milestone creation is safe to retry if the connection drops.</span>
@@ -397,7 +398,7 @@ export default function ProjectMilestonesPage({
                             </fieldset>
                           )}
                           <div className="project-form-actions milestone-field-wide">
-                            <button className="primary-button" type="submit" disabled={Boolean(pending)}>
+                            <button className="primary-button" type="submit" disabled={Boolean(pending)}><CheckIcon />
                               {pending === milestone.id ? "Saving..." : "Save changes"}
                             </button>
                             <span className="project-version-note">Save checks version {milestone.version}.</span>
@@ -409,7 +410,7 @@ export default function ProjectMilestonesPage({
                             type="button"
                             disabled={Boolean(pending)}
                             onClick={() => setDeleteTarget(milestone)}
-                          >
+                          ><TrashIcon />
                             Delete milestone
                           </button>
                           {deleteTarget?.id === milestone.id && (
@@ -426,14 +427,14 @@ export default function ProjectMilestonesPage({
                                   type="button"
                                   disabled={Boolean(pending)}
                                   onClick={() => void deleteMilestone(milestone)}
-                                >
+                                ><TrashIcon />
                                   {pending === `delete-${milestone.id}` ? "Deleting..." : "Delete this milestone"}
                                 </button>
                                 <button
                                   type="button"
                                   disabled={Boolean(pending)}
                                   onClick={() => setDeleteTarget(null)}
-                                >
+                                ><XIcon />
                                   Keep milestone
                                 </button>
                               </div>

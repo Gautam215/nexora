@@ -1,3 +1,4 @@
+import { RefreshIcon } from "./components/button-icons";
 "use client";
 
 // Route error boundary: when a page throws during render,
@@ -21,7 +22,7 @@ export default function RouteError({
           The page hit an unexpected error. Try again, or return to
           your workspaces and continue from there.
         </p>
-        <button type="button" onClick={() => reset()}>
+        <button type="button" onClick={() => reset()}><RefreshIcon />
           Try again
         </button>{" "}
         <a href="/workspaces">Back to workspaces</a>

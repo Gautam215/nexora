@@ -3,6 +3,7 @@
 import { useEffect, useState, type DragEvent, type FormEvent } from "react";
 import ProjectWorkNav from "./project-work-nav";
 import { BrandLogo } from "./brand-logo";
+import { ArchiveIcon, AtSignIcon, CheckIcon, ChevronDownIcon, ChevronUpIcon, DownloadIcon, FilterIcon, PlusIcon, RefreshIcon, SendIcon, SlidersIcon, TrashIcon, XIcon } from "./button-icons";
 
 type TaskPriority = "low" | "medium" | "high" | "urgent";
 type TaskView = "board" | "list";
@@ -534,7 +535,7 @@ export default function ProjectTasksPage({
                   <p className="eyebrow">Project workflow</p>
                   <h3 id="workflow-heading">{statuses.length} columns</h3>
                 </div>
-                <button className="quiet-button" type="button" onClick={beginWorkflowEdit} disabled={Boolean(pending)}>
+                <button className="quiet-button" type="button" onClick={beginWorkflowEdit} disabled={Boolean(pending)}><SlidersIcon />
                   {workflowOpen ? "Close settings" : "Configure columns"}
                 </button>
               </div>
@@ -569,14 +570,14 @@ export default function ProjectTasksPage({
                             <span>Completion column</span>
                           </label>
                           <div className="task-workflow-actions">
-                            <button className="quiet-button" type="button" aria-label={`Move ${status.name} up`} onClick={() => moveWorkflowStatus(index, -1)} disabled={Boolean(pending) || index === 0}>Up</button>
-                            <button className="quiet-button" type="button" aria-label={`Move ${status.name} down`} onClick={() => moveWorkflowStatus(index, 1)} disabled={Boolean(pending) || index === workflowDraft.length - 1}>Down</button>
+                            <button className="quiet-button" type="button" aria-label={`Move ${status.name} up`} onClick={() => moveWorkflowStatus(index, -1)} disabled={Boolean(pending) || index === 0}><ChevronUpIcon />Up</button>
+                            <button className="quiet-button" type="button" aria-label={`Move ${status.name} down`} onClick={() => moveWorkflowStatus(index, 1)} disabled={Boolean(pending) || index === workflowDraft.length - 1}><ChevronDownIcon />Down</button>
                             <button
                               className="quiet-button"
                               type="button"
                               onClick={() => setWorkflowDraft((current) => current.filter((_, itemIndex) => itemIndex !== index))}
                               disabled={Boolean(pending) || workflowDraft.length <= 2 || hasHistory}
-                            >
+                            ><TrashIcon />
                               Remove
                             </button>
                           </div>
@@ -585,10 +586,10 @@ export default function ProjectTasksPage({
                     })}
                   </div>
                   <div className="project-form-actions">
-                    <button className="primary-button" type="submit" disabled={Boolean(pending)}>
+                    <button className="primary-button" type="submit" disabled={Boolean(pending)}><CheckIcon />
                       {pending === "workflow" ? "Saving..." : "Save columns"}
                     </button>
-                    <button className="quiet-button" type="button" onClick={() => setWorkflowDraft((current) => [...current, { name: "New column", isDone: false }])} disabled={Boolean(pending) || workflowDraft.length >= 12}>
+                    <button className="quiet-button" type="button" onClick={() => setWorkflowDraft((current) => [...current, { name: "New column", isDone: false }])} disabled={Boolean(pending) || workflowDraft.length >= 12}><PlusIcon />
                       Add a column
                     </button>
                     <span className="project-version-note">Workflow version {workflowVersion}</span>
@@ -605,7 +606,7 @@ export default function ProjectTasksPage({
                   <p className="eyebrow">Move the work forward</p>
                   <h3 id="task-create-heading">Create a task</h3>
                 </div>
-                <button className="primary-button project-add-button" type="button" onClick={() => setCreating((open) => !open)} disabled={Boolean(pending)}>
+                <button className="primary-button project-add-button" type="button" onClick={() => setCreating((open) => !open)} disabled={Boolean(pending)}><PlusIcon />
                   {creating ? "Close form" : "New task"}
                 </button>
               </div>
@@ -691,8 +692,8 @@ export default function ProjectTasksPage({
                 </label>
               )}
               <div className="task-filter-actions">
-                <button className="primary-button" type="submit" disabled={Boolean(pending)}>Apply filters</button>
-                <button className="quiet-button" type="button" onClick={clearFilters} disabled={Boolean(pending)}>Clear</button>
+                <button className="primary-button" type="submit" disabled={Boolean(pending)}><FilterIcon />Apply filters</button>
+                <button className="quiet-button" type="button" onClick={clearFilters} disabled={Boolean(pending)}><XIcon />Clear</button>
               </div>
             </form>
 
@@ -703,10 +704,10 @@ export default function ProjectTasksPage({
                 <select id="bulk-priority" name="priority" defaultValue="high" disabled={Boolean(pending)}>
                   {PRIORITIES.map((priority) => <option key={priority} value={priority}>{formatStatus(priority)}</option>)}
                 </select>
-                <button className="primary-button" type="submit" disabled={Boolean(pending)}>
+                <button className="primary-button" type="submit" disabled={Boolean(pending)}><CheckIcon />
                   {pending === "bulk" ? "Updating..." : "Update priority"}
                 </button>
-                <button className="quiet-button" type="button" onClick={() => setSelectedIds([])} disabled={Boolean(pending)}>Cancel</button>
+                <button className="quiet-button" type="button" onClick={() => setSelectedIds([])} disabled={Boolean(pending)}><XIcon />Cancel</button>
               </form>
             )}
 
@@ -807,7 +808,7 @@ export default function ProjectTasksPage({
             )}
 
             {hasMore && (
-              <button className="quiet-button project-load-more" type="button" onClick={() => void loadMore()} disabled={loadingMore || Boolean(pending)}>
+              <button className="quiet-button project-load-more" type="button" onClick={() => void loadMore()} disabled={loadingMore || Boolean(pending)}><ChevronDownIcon />
                 {loadingMore ? "Loading..." : "Load more tasks"}
               </button>
             )}
@@ -1059,13 +1060,13 @@ function TaskCard({
               {task.dependencies.length > 0 && <p>Prerequisites: {task.dependencies.map((dependency) => dependency.title).join(", ")}</p>}
             </div>
           )}
-          {editable && <button className="quiet-button task-archive-button" type="button" onClick={onArchive} disabled={pending}>Archive task</button>}
+          {editable && <button className="quiet-button task-archive-button" type="button" onClick={onArchive} disabled={pending}><ArchiveIcon />Archive task</button>}
           <section className="task-activity task-comments" aria-label={`Comments for ${task.title}`}>
             <h5>Comments</h5>
             {commentsLoading && <p className="workspace-note" role="status">Loading comments...</p>}
             {commentsError && (
               <p className="form-message form-error" role="alert">
-                {commentsError} {comments === null && <button type="button" className="quiet-button" onClick={() => void loadComments()}>Retry</button>}
+                {commentsError} {comments === null && <button type="button" className="quiet-button" onClick={() => void loadComments()}><RefreshIcon />Retry</button>}
               </p>
             )}
             {comments?.length ? (
@@ -1077,11 +1078,11 @@ function TaskCard({
                     {comment.can_delete && (
                       confirmingCommentId === comment.id ? (
                         <span className="task-comment-delete-confirm">
-                          <button className="quiet-button" type="button" onClick={() => void deleteComment(comment.id)} disabled={commentDeletePending}>Confirm delete</button>
-                          <button className="quiet-button" type="button" onClick={() => setConfirmingCommentId("")} disabled={commentDeletePending}>Cancel</button>
+                          <button className="quiet-button" type="button" onClick={() => void deleteComment(comment.id)} disabled={commentDeletePending}><TrashIcon />Confirm delete</button>
+                          <button className="quiet-button" type="button" onClick={() => setConfirmingCommentId("")} disabled={commentDeletePending}><XIcon />Cancel</button>
                         </span>
                       ) : (
-                        <button className="quiet-button" type="button" onClick={() => setConfirmingCommentId(comment.id)} disabled={commentDeletePending}>Delete</button>
+                        <button className="quiet-button" type="button" onClick={() => setConfirmingCommentId(comment.id)} disabled={commentDeletePending}><TrashIcon />Delete</button>
                       )
                     )}
                   </li>
@@ -1101,7 +1102,7 @@ function TaskCard({
                       ))}
                     </select>
                   </label>
-                  <button className="quiet-button" type="button" onClick={insertMention} disabled={!mentionMemberId || comments === null || commentPending || pending}>
+                  <button className="quiet-button" type="button" onClick={insertMention} disabled={!mentionMemberId || comments === null || commentPending || pending}><AtSignIcon />
                     Insert mention
                   </button>
                 </div>
@@ -1119,7 +1120,7 @@ function TaskCard({
                     disabled={comments === null || commentPending || pending}
                   />
                 </label>
-                <button className="primary-button" type="submit" disabled={comments === null || commentPending || pending || !commentDraft.trim()}>
+                <button className="primary-button" type="submit" disabled={comments === null || commentPending || pending || !commentDraft.trim()}><SendIcon />
                   {commentPending ? "Posting..." : "Post comment"}
                 </button>
               </form>
@@ -1282,7 +1283,7 @@ function TaskFilesPanel({ collectionUrl, canEdit, open }: {
       {loading && <p className="workspace-note" role="status">Loading attachments...</p>}
       {error && (
         <p className="form-message form-error" role="alert">
-          {error} {files === null && <button type="button" className="quiet-button" onClick={() => setError("")}>Retry</button>}
+          {error} {files === null && <button type="button" className="quiet-button" onClick={() => setError("")}><RefreshIcon />Retry</button>}
         </p>
       )}
       {files?.length ? (
@@ -1302,7 +1303,7 @@ function TaskFilesPanel({ collectionUrl, canEdit, open }: {
                 ) : file.scan_status === "quarantined" ? (
                   <small className="task-file-scan-warning">This file is quarantined and cannot be downloaded.</small>
                 ) : (
-                  <button type="button" className="quiet-button" onClick={() => void downloadFile(file)} disabled={Boolean(pending)}>
+                  <button type="button" className="quiet-button" onClick={() => void downloadFile(file)} disabled={Boolean(pending)}><DownloadIcon />
                     {pending === `download:${file.id}` ? "Preparing..." : "Download"}
                   </button>
                 )}
@@ -1316,7 +1317,7 @@ function TaskFilesPanel({ collectionUrl, canEdit, open }: {
                         if (nextFile) void transferFile(nextFile, file);
                       }} />
                     </label>
-                    <button type="button" className="quiet-button task-file-delete" aria-label={`Remove ${file.original_filename}`} onClick={() => void deleteFile(file)} disabled={Boolean(pending)}>
+                    <button type="button" className="quiet-button task-file-delete" aria-label={`Remove ${file.original_filename}`} onClick={() => void deleteFile(file)} disabled={Boolean(pending)}><TrashIcon />
                       {pending === `delete:${file.id}` ? "Removing..." : "Remove"}
                     </button>
                   </>
@@ -1472,7 +1473,7 @@ function TaskEditorForm({
         {!dependencyTasks.length && <small className="form-hint">Create another active task first to add a prerequisite.</small>}
       </label>
       <div className="project-form-actions task-field-wide">
-        <button className="primary-button" type="submit" disabled={disabled || !statuses.length}>{submitLabel}</button>
+        <button className="primary-button" type="submit" disabled={disabled || !statuses.length}><CheckIcon />{submitLabel}</button>
         {task && <span className="project-version-note">Saving checks task version {task.version}.</span>}
       </div>
     </form>

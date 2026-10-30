@@ -564,7 +564,7 @@ h1 {
 }
 
 .auth-kicker {
-  color: #a9c2b0;
+  color: #ffffff;
   font-size: 11px;
   font-weight: 650;
   letter-spacing: 0.13em;
@@ -698,7 +698,7 @@ h1 {
 }
 
 .form-error {
-  color: #f0a8a0;
+  color: #ff453a;
 }
 
 .form-success {
@@ -1450,10 +1450,6 @@ h1 {
 .invitation-actions .workspace-note {
   max-width: 360px;
   margin: 0;
-}
-
-.invitation-switch {
-  padding: 3px 0;
 }
 
 .invitation-action {
@@ -3090,7 +3086,6 @@ h1 {
 }
 
 .task-archive-button {
-  display: inline-block;
   margin-top: 12px;
   color: #d5aaa3;
   text-decoration-color: #75534f;
@@ -3246,7 +3241,7 @@ h1 {
 }
 
 .task-file-scan-warning {
-  color: #e6c87a;
+  color: #ff453a;
 }
 
 .task-file-actions {
@@ -4138,4 +4133,107 @@ body.login-bloom::before,
 body.login-bloom::after,
 body.login-bloom .liquid-wave-background {
   display: none;
+}
+
+/* Buttons, site-wide: action icons + Apple liquid glass with light blur.
+   Icons are decorative (labels stay); sizing comes from `.button-icon`.
+   The shell-scoped danger selectors tie the Apple shell's danger rules and
+   win by order, so danger looks the same inside and outside app shells. */
+.button-icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+}
+
+.primary-button {
+  gap: 8px;
+  border-color: rgba(255, 255, 255, 0.22);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.05) 55%, rgba(255, 255, 255, 0.02));
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  backdrop-filter: blur(12px) saturate(1.4);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.06),
+    0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+.primary-button:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.34);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.24), rgba(255, 255, 255, 0.09) 55%, rgba(255, 255, 255, 0.04));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.08),
+    0 8px 24px rgba(0, 0, 0, 0.35),
+    0 0 20px rgba(255, 255, 255, 0.12);
+}
+
+.danger-button,
+.auth-layout .danger-button,
+.project-work-layout .danger-button {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border: 1px solid rgba(255, 69, 58, 0.5);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 69, 58, 0.28), rgba(255, 69, 58, 0.1) 55%, rgba(255, 69, 58, 0.04));
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  backdrop-filter: blur(12px) saturate(1.4);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.06),
+    0 8px 24px rgba(0, 0, 0, 0.35);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.danger-button:hover:not(:disabled),
+.auth-layout .danger-button:hover:not(:disabled),
+.project-work-layout .danger-button:hover:not(:disabled) {
+  border-color: rgba(255, 69, 58, 0.7);
+  background: linear-gradient(180deg, rgba(255, 69, 58, 0.38), rgba(255, 69, 58, 0.16) 55%, rgba(255, 69, 58, 0.06));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.08),
+    0 8px 24px rgba(0, 0, 0, 0.35),
+    0 0 20px rgba(255, 69, 58, 0.2);
+}
+
+.danger-button:active:not(:disabled),
+.auth-layout .danger-button:active,
+.project-work-layout .danger-button:active {
+  transform: scale(0.94);
+}
+
+.quiet-button {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02));
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+  backdrop-filter: blur(12px) saturate(1.4);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 4px 14px rgba(0, 0, 0, 0.25);
+  color: #c3cec8;
+  font-size: 13px;
+  font-weight: 550;
+  text-decoration: none;
+}
+
+.quiet-button:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.04));
+}
+
+/* Load-more buttons are block-level, so flex gap does not apply; the icon
+   keeps its spacing from a margin instead. */
+.project-load-more .button-icon {
+  margin-right: 8px;
+  vertical-align: -2px;
 }

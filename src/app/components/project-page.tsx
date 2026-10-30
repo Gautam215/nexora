@@ -14,6 +14,7 @@ import AiRiskPanel from "./ai-risk-panel";
 import AiSummaryPanel from "./ai-summary-panel";
 import ProjectWorkNav from "./project-work-nav";
 import { BrandLogo } from "./brand-logo";
+import { CheckIcon, ShieldIcon, TrashIcon, UserPlusIcon, XIcon } from "./button-icons";
 
 interface Project {
   id: string;
@@ -463,7 +464,7 @@ export default function ProjectPage({
                       />
                     </label>
                     <div className="project-form-actions project-field-wide">
-                      <button className="primary-button" type="submit" disabled={Boolean(pending)}>
+                      <button className="primary-button" type="submit" disabled={Boolean(pending)}><CheckIcon />
                         {pending === "project" ? "Saving..." : "Save details"}
                       </button>
                     </div>
@@ -503,10 +504,10 @@ export default function ProjectPage({
                           type="button"
                           onClick={() => void deleteProject()}
                           disabled={Boolean(pending)}
-                        >
+                        ><TrashIcon />
                           {pending === "delete" ? "Deleting..." : "Delete this project"}
                         </button>
-                        <button type="button" onClick={() => setConfirmDelete(false)} disabled={Boolean(pending)}>
+                        <button type="button" onClick={() => setConfirmDelete(false)} disabled={Boolean(pending)}><XIcon />
                           Keep project
                         </button>
                       </div>
@@ -517,7 +518,7 @@ export default function ProjectPage({
                       type="button"
                       onClick={() => setConfirmDelete(true)}
                       disabled={Boolean(pending)}
-                    >
+                    ><TrashIcon />
                       Delete project
                     </button>
                   )}
@@ -564,7 +565,7 @@ export default function ProjectPage({
                             <option value="viewer">Viewer</option>
                           </select>
                         </label>
-                        <button className="primary-button" type="submit" disabled={Boolean(pending) || !selectedMember}>
+                        <button className="primary-button" type="submit" disabled={Boolean(pending) || !selectedMember}><UserPlusIcon />
                           {pending === "add-member" ? "Adding..." : "Add person"}
                         </button>
                       </form>
@@ -608,7 +609,7 @@ export default function ProjectPage({
                                 onClick={() => void updateMember(member.user_id, {
                                   status: member.status === "active" ? "disabled" : "active",
                                 })}
-                              >
+                              ><ShieldIcon />
                                 {member.status === "active" ? "Disable" : "Restore"}
                               </button>
                             </div>

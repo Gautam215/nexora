@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { RefreshIcon } from "./button-icons";
 
 // Live project updates. A deliberately small surface: the
 // panel opens the project's Server-Sent Events stream, shows the
@@ -86,7 +87,7 @@ export default function RealtimePanel({
       {hasUpdate ? (
         <div>
           <p className="project-section-copy">This project changed. Refresh to see the latest work.</p>
-          <button type="button" onClick={() => window.location.reload()}>
+          <button type="button" onClick={() => window.location.reload()}><RefreshIcon />
             Refresh project
           </button>
         </div>

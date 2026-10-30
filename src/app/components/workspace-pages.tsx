@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { BrandLogo } from "./brand-logo";
+import { PlusIcon, ShieldIcon, SignOutIcon } from "./button-icons";
 
 interface Organization {
   id: string;
@@ -138,8 +139,8 @@ export default function WorkspacePage({ mode }: WorkspacePageProps) {
           <div className="workspace-topline">
             <span className="auth-kicker">Your Nexora</span>
             <div className="workspace-topline-actions">
-              <a className="quiet-button" href="/account">Account security</a>
-              <button className="quiet-button" type="button" onClick={signOut} disabled={pending}>
+              <a className="quiet-button" href="/account"><ShieldIcon />Account security</a>
+              <button className="quiet-button" type="button" onClick={signOut} disabled={pending}><SignOutIcon />
                 Sign out
               </button>
             </div>
@@ -189,7 +190,7 @@ export default function WorkspacePage({ mode }: WorkspacePageProps) {
                 </div>
                 <small>Lowercase letters, numbers, and single hyphens.</small>
               </label>
-              <button className="primary-button" type="submit" disabled={pending}>
+              <button className="primary-button" type="submit" disabled={pending}><PlusIcon />
                 {pending ? "Creating..." : "Create workspace"}
               </button>
               <a className="secondary-link" href="/workspaces">Back to workspaces</a>
@@ -223,7 +224,7 @@ export default function WorkspacePage({ mode }: WorkspacePageProps) {
                   <p>Create a workspace to establish its secure membership boundary.</p>
                 </div>
               )}
-              <a className="primary-button button-link" href="/onboarding">Create a workspace</a>
+              <a className="primary-button button-link" href="/onboarding"><PlusIcon />Create a workspace</a>
               <p className="workspace-note">Open a workspace to view its projects and team access.</p>
             </div>
           )}

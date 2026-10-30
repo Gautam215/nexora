@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { BrandLogo } from "./brand-logo";
+import { ArrowRightIcon, SignInIcon, SignOutIcon } from "./button-icons";
 
 const INVITATION_TOKEN_KEY = "nexora.pending-invitation";
 const LOGIN_URL = "/login?next=%2Faccept-invitation";
@@ -132,12 +133,12 @@ export default function AcceptInvitationPage() {
           {loading ? (
             <p className="workspace-loading" role="status">Checking your invitation...</p>
           ) : accepted ? (
-            <a className="primary-button button-link invitation-action" href="/workspaces?invitation=accepted">
+            <a className="primary-button button-link invitation-action" href="/workspaces?invitation=accepted"><ArrowRightIcon />
               Go to your workspaces
             </a>
           ) : needsLogin ? (
             <div className="invitation-actions">
-              <a className="primary-button button-link" href={LOGIN_URL}>Sign in with the invited email</a>
+              <a className="primary-button button-link" href={LOGIN_URL}><SignInIcon />Sign in with the invited email</a>
               <p className="workspace-note">New to Nexora? Create and verify an account with that same email, then sign in to accept the invitation.</p>
               <a className="secondary-link" href="/register?next=%2Faccept-invitation">Create an account</a>
             </div>
@@ -145,11 +146,11 @@ export default function AcceptInvitationPage() {
             <div className="invitation-actions">
               <p className="form-message form-error" role="alert">{error}</p>
               {signedIn && (
-                <button className="quiet-button invitation-switch" type="button" onClick={signOutAndSwitchAccount} disabled={pending}>
+                <button className="quiet-button invitation-switch" type="button" onClick={signOutAndSwitchAccount} disabled={pending}><SignOutIcon />
                   {pending ? "Signing out..." : "Sign out and choose the invited email"}
                 </button>
               )}
-              {hasToken && !signedIn && <a className="primary-button button-link" href={LOGIN_URL}>Sign in and try again</a>}
+              {hasToken && !signedIn && <a className="primary-button button-link" href={LOGIN_URL}><SignInIcon />Sign in and try again</a>}
               <a className="secondary-link" href="/workspaces">Back to workspaces</a>
             </div>
           ) : null}
