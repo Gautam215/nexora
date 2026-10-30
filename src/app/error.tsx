@@ -1,5 +1,6 @@
-import { RefreshIcon } from "./components/button-icons";
 "use client";
+
+import { RefreshIcon } from "./components/button-icons";
 
 // Route error boundary: when a page throws during render,
 // Next.js renders this instead of an unstyled failure. The message is
