@@ -30,23 +30,6 @@ test("search filters accept only known types and canonical project identifiers",
   assert.equal(parseSearchRequest(new URLSearchParams("q=milestone&projectId=not-a-uuid" )).success, false);
 });
 
-test("search filters accept date range, person, and project status", () => {
-  const parsed = parseSearchRequest(new URLSearchParams(
-    `q=launch&from=2026-10-01&to=2026-10-31&ownerId=${PROJECT_ID}&status=active`,
-  ));
-  assert.equal(parsed.success, true);
-  if (!parsed.success) return;
-  assert.equal(parsed.data.from, "2026-10-01");
-  assert.equal(parsed.data.to, "2026-10-31");
-  assert.equal(parsed.data.ownerId, PROJECT_ID);
-  assert.equal(parsed.data.status, "active");
-
-  assert.equal(parseSearchRequest(new URLSearchParams("q=launch&from=2026-13-01")).success, false);
-  assert.equal(parseSearchRequest(new URLSearchParams("q=launch&from=2026-10-31&to=2026-10-01")).success, false);
-  assert.equal(parseSearchRequest(new URLSearchParams("q=launch&ownerId=not-a-uuid")).success, false);
-  assert.equal(parseSearchRequest(new URLSearchParams("q=launch&status=done")).success, false);
-});
-
 test("search bounds reject missing, short, oversized, control, and excessive paging input", () => {
   assert.equal(parseSearchRequest(new URLSearchParams()).success, false);
   assert.equal(parseSearchRequest(new URLSearchParams("q=x")).success, false);

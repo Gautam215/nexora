@@ -74,15 +74,9 @@ error name, validated database code).
   default 0). The task list uses the same discipline: filters, sorting,
   and pagination on the server, never a full-table fetch to the client.
 - Filters are an allowlist, never free-form SQL. The search route accepts
-  only its documented `type` values, a UUID `projectId`, a UUID `ownerId`,
-  a project `status` from the project-status enum, and a `from`/`to` date
-  range (calendar days on `created_at`); anything else is rejected by
-  validation, and the accepted values select only fixed, server-owned
-  SQL fragments. The person filter matches a project's owner, a task's
-  assignee, a comment's author, a member's own id, and a file's uploader.
-  The project-status filter scopes projects by their own status and
-  tasks, comments, and files by their project's status; members have no
-  project and are never filtered by it.
+  only its documented `type` values and a UUID `projectId`; anything else
+  is rejected by validation, and the accepted values select only fixed,
+  server-owned SQL fragments.
 - Sorting is by a fixed set of server-owned keys. A client-supplied sort
   key that is not on the allowlist is rejected, not interpolated.
 
@@ -405,7 +399,7 @@ list.
 
 | Method and path | Purpose |
 | --- | --- |
-| GET `/api/organizations/{organizationId}/search` | Authorized, tenant-aware, permission-aware search over visible projects, active tasks, comments, active organization members, and active file names. Query `q` (2–120 characters), `type` (`all`, `project`, `task`, `comment`, `member`, `file`), optional UUID `projectId`, optional UUID `ownerId` (project owner, task assignee, comment author, member id, file uploader), optional `status` (`planned`, `active`, `on_hold`, `completed`, `archived`; projects by their own status, tasks/comments/files by their project's status, members unfiltered), optional `from`/`to` calendar dates on `created_at` (`from` ≤ `to`; `to` is inclusive as a day), `limit`, `offset`. Rate-limited (60 per user per hour, 120 per IP per hour). Results contain only a display title, a short preview, and an in-app destination. Member results never include email addresses; file results never include file content or storage keys. Archived tasks, archived-task comments, and deleted files are excluded. |
+| GET `/api/organizations/{organizationId}/search` | Authorized, tenant-aware, permission-aware search over visible projects, active tasks, comments, active organization members, and active file names. Query `q` (2–120 characters), `type` (`all`, `project`, `task`, `comment`, `member`, `file`), optional UUID `projectId`, `limit`, `offset`. Rate-limited (60 per user per hour, 120 per IP per hour). Results contain only a display title, a short preview, and an in-app destination. Member results never include email addresses; file results never include file content or storage keys. Archived tasks, archived-task comments, and deleted files are excluded. |
 
 ### 2.6 Notifications
 

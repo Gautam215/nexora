@@ -43,10 +43,6 @@ const SEARCH_SOURCES: Record<SearchEntityType, string> = {
         'simple'::pg_catalog.regconfig,
         project.name || ' ' || COALESCE(project.description, '')
       ) @@ pg_catalog.plainto_tsquery('simple'::pg_catalog.regconfig, $2)
-      AND ($4::timestamptz IS NULL OR project.created_at >= $4::timestamptz)
-      AND ($5::timestamptz IS NULL OR project.created_at < $5::timestamptz)
-      AND ($6::uuid IS NULL OR project.owner_user_id = $6)
-      AND ($7::nexora.project_status IS NULL OR project.status = $7::nexora.project_status)
   `,
   task: `
     SELECT 'task'::text AS entity_type,
@@ -74,10 +70,6 @@ const SEARCH_SOURCES: Record<SearchEntityType, string> = {
         'simple'::pg_catalog.regconfig,
          task.title || ' ' || COALESCE(task.description, '') || ' ' || nexora.searchable_task_labels(task.labels)
       ) @@ pg_catalog.plainto_tsquery('simple'::pg_catalog.regconfig, $2)
-      AND ($4::timestamptz IS NULL OR task.created_at >= $4::timestamptz)
-      AND ($5::timestamptz IS NULL OR task.created_at < $5::timestamptz)
-      AND ($6::uuid IS NULL OR task.assignee_user_id = $6)
-      AND ($7::nexora.project_status IS NULL OR project.status = $7::nexora.project_status)
   `,
   comment: `
     SELECT 'comment'::text AS entity_type,
@@ -106,10 +98,6 @@ const SEARCH_SOURCES: Record<SearchEntityType, string> = {
         'simple'::pg_catalog.regconfig,
         comment.body
       ) @@ pg_catalog.plainto_tsquery('simple'::pg_catalog.regconfig, $2)
-      AND ($4::timestamptz IS NULL OR comment.created_at >= $4::timestamptz)
-      AND ($5::timestamptz IS NULL OR comment.created_at < $5::timestamptz)
-      AND ($6::uuid IS NULL OR comment.author_user_id = $6)
-      AND ($7::nexora.project_status IS NULL OR project.status = $7::nexora.project_status)
   `,
   member: `
     SELECT 'member'::text AS entity_type,
@@ -142,13 +130,6 @@ const SEARCH_SOURCES: Record<SearchEntityType, string> = {
         'simple'::pg_catalog.regconfig,
         member.display_name
       ) @@ pg_catalog.plainto_tsquery('simple'::pg_catalog.regconfig, $2)
-      AND ($4::timestamptz IS NULL OR COALESCE(member.joined_at, '1970-01-01'::timestamptz) >= $4::timestamptz)
-      AND ($5::timestamptz IS NULL OR COALESCE(member.joined_at, '1970-01-01'::timestamptz) < $5::timestamptz)
-      AND ($6::uuid IS NULL OR member.user_id = $6)
-      -- Members have no project status, so this never filters. It only
-      -- references $7 so its type stays determinable for member-only
-      -- searches, where no other source mentions it.
-      AND ($7::nexora.project_status IS NULL OR $7::nexora.project_status IS NOT NULL)
   `,
   file: `
     SELECT 'file'::text AS entity_type,
@@ -177,10 +158,6 @@ const SEARCH_SOURCES: Record<SearchEntityType, string> = {
         'simple'::pg_catalog.regconfig,
         file.original_filename
       ) @@ pg_catalog.plainto_tsquery('simple'::pg_catalog.regconfig, $2)
-      AND ($4::timestamptz IS NULL OR file.created_at >= $4::timestamptz)
-      AND ($5::timestamptz IS NULL OR file.created_at < $5::timestamptz)
-      AND ($6::uuid IS NULL OR file.uploaded_by_user_id = $6)
-      AND ($7::nexora.project_status IS NULL OR project.status = $7::nexora.project_status)
   `,
 };
 
@@ -215,13 +192,8 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
     }
 
     const { organizationId } = await params;
-    const { q, type, projectId, from, to, ownerId, status, limit, offset } = parsed.data;
+    const { q, type, projectId, limit, offset } = parsed.data;
     const sources = selectedSources(type);
-    // `to` is an inclusive calendar day, so the upper bound is the next day.
-    const fromBound = from ? new Date(`${from}T00:00:00Z`).toISOString() : null;
-    const toBound = to
-      ? new Date(Date.parse(`${to}T00:00:00Z`) + 86_400_000).toISOString()
-      : null;
     const result = await withOrganizationContext(
       principal.userId,
       organizationId,
@@ -246,12 +218,12 @@ export async function GET(request: NextRequest, { params }: RouteContext) {
                       SELECT *
                       FROM matches
                       ORDER BY created_at DESC, entity_type, id
-                      LIMIT $8 OFFSET $9
+                      LIMIT $4 OFFSET $5
                     ) AS page
                   ),
                   '[]'::jsonb
                 ) AS results`,
-        [organizationId, q, projectId ?? null, fromBound, toBound, ownerId ?? null, status ?? null, limit, offset],
+        [organizationId, q, projectId ?? null, limit, offset],
       ),
       "guest",
     );
