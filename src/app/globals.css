@@ -4125,6 +4125,12 @@ h1 {
   display: none;
 }
 
+/* Same login-only scoping: the story column's divider line between the two
+   columns goes away on login too, so nothing cuts across the flower. */
+.auth-layout--bloom .auth-story {
+  border-right: none;
+}
+
 /* Login page only: the flower replaces the site-wide wave background, so
    the wave layers hide while the login page is mounted (AuthPage adds
    `login-bloom` to <body> for login mode and removes it on unmount). */
