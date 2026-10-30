@@ -340,7 +340,7 @@ test("workspace search is tenant-scoped, permission-aware, bounded, and indexed"
   assert.match(searchRoute, /isRateLimited\(request, "workspace-search"/);
   assert.match(searchRoute, /plainto_tsquery/);
   assert.match(searchRoute, /nexora\.searchable_task_labels\(task\.labels\)/);
-  assert.match(searchRoute, /LIMIT \$4 OFFSET \$5/);
+  assert.match(searchRoute, /LIMIT \$8 OFFSET \$9/);
   assert.doesNotMatch(searchRoute, /ILIKE|queryRaw|\$\{q\}/i);
   assert.match(searchSchemas, /\.min\(2\)/);
   assert.match(searchSchemas, /\.max\(120\)/);

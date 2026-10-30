@@ -1742,78 +1742,356 @@ h1 {
   margin-top: 10px;
 }
 
+/* Workspace search page: one Inter type scale, 12px control radius,
+   44px minimum targets, and small text at 4.5:1 or better. */
+.search-layout {
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+}
+
+.search-layout .auth-story {
+  justify-content: flex-start;
+  gap: 56px;
+}
+
+/* One faint ring only: the old triple-ring arcs crossed the headline.
+   The .auth-layout prefix beats the later app-shell override. */
+.search-layout.auth-layout .auth-story::after {
+  width: min(40vw, 420px);
+  border-color: rgb(169 194 176 / 3%);
+  box-shadow: none;
+}
+
+.search-layout .auth-story-copy {
+  margin: 0;
+  padding-left: 0;
+}
+
+.search-layout .auth-story-copy h1 {
+  font-size: clamp(30px, 3vw, 40px);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.1;
+}
+
+.search-layout .auth-story-copy > p:last-child {
+  color: #b9c2bb;
+  font-size: 14px;
+}
+
 .search-dashboard {
   width: min(100%, 920px);
 }
 
-.search-eyebrow {
-  margin-top: 25px;
-  margin-bottom: 8px;
+.search-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 20px;
 }
 
-.search-dashboard h2 {
+.search-breadcrumb ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
   margin: 0;
-  color: #f0f2f0;
-  font-size: clamp(25px, 3vw, 34px);
-  letter-spacing: -0.045em;
+  padding: 0;
+  list-style: none;
+}
+
+.search-breadcrumb li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #cdd5cf;
+  font-size: 13px;
+}
+
+.search-breadcrumb li + li::before {
+  color: #8a948d;
+  content: "/";
+}
+
+.search-breadcrumb a,
+.search-nav-links a {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  color: #b9c2bb;
+}
+
+.search-breadcrumb li[aria-current="page"] {
+  color: #edf1ee;
+}
+
+.search-nav-links {
+  display: flex;
+  gap: 18px;
+}
+
+.search-nav-links a {
+  font-size: 13px;
+}
+
+.search-trust {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 18px 0 0;
+  padding: 8px 12px;
+  border: 1px solid #39443d;
+  border-radius: 12px;
+  background: #171b19;
+  color: #cdd5cf;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.search-trust-icon {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
 }
 
 .search-description {
   max-width: 650px;
-  margin: 9px 0 20px;
-  color: #9ba59e;
+  margin: 12px 0 20px;
+  color: #b9c2bb;
   font-size: 13px;
   line-height: 1.6;
 }
 
 .search-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(150px, 190px) auto;
-  align-items: end;
-  gap: 12px;
-  padding: 14px;
+  gap: 14px;
+  padding: 16px;
   border: 1px solid #333b37;
-  border-radius: 10px;
+  border-radius: 12px;
   background: #171b19;
 }
 
 .search-input-field,
-.search-filter-field {
+.search-project-field,
+.search-person-field,
+.search-status-field,
+.search-date-field {
   display: grid;
   min-width: 0;
   gap: 6px;
-  color: #c1cbc4;
-  font-size: 11px;
+  color: #cdd5cf;
+  font-size: 12px;
+  font-weight: 600;
 }
 
-.search-input-field input,
-.search-filter-field select {
+.search-input-wrap {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+/* The .auth-layout prefix beats the later app-shell input override. */
+.search-layout.auth-layout .search-input-field input,
+.search-layout.auth-layout .search-project-field select,
+.search-layout.auth-layout .search-person-field select,
+.search-layout.auth-layout .search-status-field select,
+.search-layout.auth-layout .search-date-field input {
   width: 100%;
   min-width: 0;
-  min-height: 42px;
-  padding: 9px 11px;
+  min-height: 44px;
+  padding: 10px 12px;
   border: 1px solid #39443d;
-  border-radius: 8px;
+  border-radius: 12px;
   background: #111512;
   color: #edf1ee;
   font: inherit;
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.search-input-field input {
+  padding-right: 52px;
+}
+
+.search-layout.auth-layout .search-input-field input::placeholder {
+  color: #aeb8b1;
+}
+
+.search-clear {
+  position: absolute;
+  top: 50%;
+  right: 4px;
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: #cdd5cf;
+  cursor: pointer;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.search-clear:hover {
+  background: #232b25;
+}
+
+.search-suggest {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid #39443d;
+  border-radius: 12px;
+  background: #111512;
+}
+
+.search-suggest-group p {
+  margin: 0 0 8px;
+  color: #b9c2bb;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.search-suggest-group ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.search-suggest-group button {
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid #39443d;
+  border-radius: 12px;
+  background: #171b19;
+  color: #cdd5cf;
+  cursor: pointer;
   font-size: 13px;
 }
 
-.search-input-field input::placeholder {
-  color: #737e76;
+.search-suggest-group button:hover {
+  border-color: #526356;
+  background: #1b211d;
+}
+
+.search-type-field {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.search-type-field legend {
+  margin-bottom: 6px;
+  color: #cdd5cf;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.search-type-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.search-chip span {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  padding: 0 16px;
+  border: 1px solid #39443d;
+  border-radius: 12px;
+  background: #111512;
+  color: #cdd5cf;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.search-chip input:checked + span {
+  border-color: #0063d1;
+  background: #0063d1;
+  color: #fff;
+}
+
+.search-chip input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+/* Deep blue, not system #0a84ff: white on #0a84ff is 3.65:1, this is 5.67:1. */
+.search-filters-field {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.search-filters-field legend {
+  margin-bottom: 6px;
+  color: #cdd5cf;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.search-filters-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.search-filters-reset {
+  min-height: 44px;
+  margin-top: 8px;
+  color: #cdd5cf;
+  font-size: 13px;
 }
 
 .search-submit {
-  min-height: 42px;
-  white-space: nowrap;
+  width: 100%;
+  min-height: 44px;
+  border-color: #0063d1;
+  border-radius: 12px;
+  background: #0063d1;
+  color: #fff;
 }
 
-.search-hint {
-  grid-column: 1 / -1;
-  margin: -4px 0 0;
-  color: #818d85;
-  font-size: 10px;
+.search-submit:hover:not(:disabled) {
+  border-color: #0057c8;
+  background: #0057c8;
+}
+
+.search-shortcut-hint {
+  margin: -6px 0 0;
+  color: #b9c2bb;
+  font-size: 12px;
+}
+
+.search-skeleton {
+  display: grid;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.search-skeleton-row {
+  height: 64px;
+  border: 1px solid #303a33;
+  border-radius: 12px;
+  background: #171b19;
+  animation: search-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes search-pulse {
+  50% {
+    opacity: 0.55;
+  }
 }
 
 .search-empty {
@@ -1824,26 +2102,34 @@ h1 {
   margin-top: 16px;
   padding: 22px;
   border: 1px dashed #374039;
-  border-radius: 10px;
-  color: #a6b1a9;
+  border-radius: 12px;
+  color: #cdd5cf;
   text-align: center;
 }
 
 .search-empty p {
   max-width: 440px;
   margin: 8px 0 0;
-  font-size: 12px;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
-.search-empty-mark {
-  display: grid;
-  width: 35px;
-  height: 35px;
-  place-items: center;
-  border: 1px solid #46534a;
-  border-radius: 50%;
-  color: #c1d2c5;
-  font-size: 21px;
+.search-empty p:first-of-type {
+  color: #edf1ee;
+  font-weight: 600;
+}
+
+.search-empty-icon {
+  width: 40px;
+  height: 40px;
+  color: #cdd5cf;
+}
+
+.search-empty-clear {
+  min-height: 44px;
+  margin-top: 12px;
+  color: #cdd5cf;
+  font-size: 13px;
 }
 
 .search-results {
@@ -1860,8 +2146,8 @@ h1 {
 
 .search-results-heading {
   margin-bottom: 10px;
-  color: #89958d;
-  font-size: 11px;
+  color: #b9c2bb;
+  font-size: 12px;
 }
 
 .search-results-heading h3 {
@@ -1877,11 +2163,13 @@ h1 {
 }
 
 .search-result {
-  display: block;
+  display: flex;
   min-width: 0;
+  align-items: flex-start;
+  gap: 12px;
   padding: 13px 14px;
   border: 1px solid #303a33;
-  border-radius: 9px;
+  border-radius: 12px;
   background: #171b19;
   color: inherit;
   text-decoration: none;
@@ -1891,6 +2179,26 @@ h1 {
 .search-result:hover {
   border-color: #526356;
   background: #1b211d;
+}
+
+.search-result-icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid #39443d;
+  border-radius: 8px;
+  background: #232b25;
+  color: #cdd5cf;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.search-result-body {
+  display: block;
+  min-width: 0;
+  flex: 1;
 }
 
 .search-result-heading {
@@ -1912,50 +2220,77 @@ h1 {
 
 .search-result-type {
   flex: 0 0 auto;
-  padding: 2px 7px;
-  border: 1px solid #39483d;
-  border-radius: 99px;
-  color: #bfd2c3;
-  font-size: 9px;
+  color: #b9c2bb;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
 
 .search-result-context,
 .search-result-preview {
+  display: block;
   overflow: hidden;
   margin: 6px 0 0;
-  color: #929e96;
-  font-size: 11px;
+  color: #b9c2bb;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .search-result-preview {
-  color: #b3bdb6;
+  color: #cdd5cf;
+}
+
+.search-mark {
+  padding: 0 1px;
+  border-radius: 3px;
+  background: rgb(169 194 176 / 0.28);
+  color: inherit;
 }
 
 .search-pagination {
   margin-top: 13px;
-  color: #929e96;
-  font-size: 11px;
+  color: #b9c2bb;
+  font-size: 12px;
 }
 
 .search-pagination .quiet-button {
   min-width: 85px;
+  min-height: 44px;
+  color: #cdd5cf;
+  font-size: 13px;
 }
 
-@media (max-width: 680px) {
-  .search-form {
+.search-footer {
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid #303a33;
+  color: #b9c2bb;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.search-footer a {
+  color: #edf1ee;
+}
+
+@media (max-width: 820px) {
+  .search-layout {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .search-submit {
-    width: 100%;
+  .search-layout .auth-story {
+    gap: 20px;
   }
 
-  .search-hint {
-    grid-column: auto;
+  .search-layout .auth-story-copy h1 {
+    font-size: clamp(28px, 8vw, 36px);
+  }
+}
+
+@media (max-width: 680px) {
+  .search-filters-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .search-result {
@@ -1975,15 +2310,217 @@ h1 {
 
 .search-result,
 .search-input-field input,
-.search-filter-field select {
+.search-project-field select,
+.search-person-field select,
+.search-status-field select,
+.search-date-field input,
+.search-chip span,
+.search-suggest-group button {
   transition-duration: 120ms;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .search-result,
   .search-input-field input,
-  .search-filter-field select {
+  .search-project-field select,
+  .search-person-field select,
+  .search-status-field select,
+  .search-date-field input,
+  .search-chip span,
+  .search-suggest-group button,
+  .search-skeleton-row {
     transition: none;
+    animation: none;
+  }
+}
+
+/* Light mode is scoped to this page only; auth pages stay dark.
+   The .auth-layout prefix beats the later app-shell overrides. */
+@media (prefers-color-scheme: light) {
+  .search-layout.auth-layout {
+    color-scheme: light;
+    background: #f4f4f2;
+  }
+
+  .search-layout .auth-story {
+    border-right-color: rgb(28 31 28 / 0.1);
+  }
+
+  .search-layout.auth-layout .auth-story::after {
+    border-color: rgb(28 31 28 / 0.08);
+  }
+
+  .search-layout .auth-story-copy h1 {
+    color: #1c1f1c;
+  }
+
+  .search-layout .auth-story-copy > p:last-child {
+    color: #3a403a;
+  }
+
+  .search-layout .workspace-card {
+    border-color: #d9ddd8;
+    background: #fff;
+    box-shadow: 0 18px 50px rgb(28 31 28 / 0.1);
+  }
+
+  .search-breadcrumb li {
+    color: #1c1f1c;
+  }
+
+  .search-breadcrumb li + li::before {
+    color: #8a948d;
+  }
+
+  .search-breadcrumb a,
+  .search-nav-links a {
+    color: #3a403a;
+  }
+
+  .search-breadcrumb li[aria-current="page"] {
+    color: #1c1f1c;
+  }
+
+  .search-trust {
+    border-color: #d9ddd8;
+    background: #eef1ee;
+    color: #3a403a;
+  }
+
+  .search-description,
+  .search-type-field legend,
+  .search-suggest-group p,
+  .search-results-heading,
+  .search-result-context,
+  .search-shortcut-hint,
+  .search-footer {
+    color: #555d55;
+  }
+
+  .search-layout.auth-layout .search-input-field,
+  .search-layout.auth-layout .search-project-field,
+  .search-layout.auth-layout .search-person-field,
+  .search-layout.auth-layout .search-status-field,
+  .search-layout.auth-layout .search-date-field,
+  .search-layout.auth-layout .search-filters-field legend {
+    color: #555d55;
+  }
+
+  .search-form,
+  .search-suggest {
+    border-color: #d9ddd8;
+    background: #fff;
+  }
+
+  .search-layout.auth-layout .search-input-field input,
+  .search-layout.auth-layout .search-project-field select,
+  .search-layout.auth-layout .search-person-field select,
+  .search-layout.auth-layout .search-status-field select,
+  .search-layout.auth-layout .search-date-field input {
+    border-color: #c9cec9;
+    background: #fff;
+    color: #1c1f1c;
+  }
+
+  .search-chip span,
+  .search-suggest-group button {
+    border-color: #c9cec9;
+    background: #fff;
+    color: #1c1f1c;
+  }
+
+  .search-layout.auth-layout .search-input-field input::placeholder {
+    color: #555d55;
+  }
+
+  .search-clear {
+    color: #3a403a;
+  }
+
+  .search-clear:hover {
+    background: #eef1ee;
+  }
+
+  .search-suggest-group button:hover {
+    background: #f4f4f2;
+  }
+
+  .search-chip input:checked + span {
+    border-color: #0063d1;
+    background: #0063d1;
+    color: #fff;
+  }
+
+  .search-skeleton-row {
+    border-color: #d9ddd8;
+    background: #e6e9e6;
+  }
+
+  .search-empty {
+    border-color: #c9cec9;
+    color: #3a403a;
+  }
+
+  .search-empty p:first-of-type {
+    color: #1c1f1c;
+  }
+
+  .search-empty-icon,
+  .search-empty-clear {
+    color: #3a403a;
+  }
+
+  .search-results-heading h3,
+  .search-result-heading strong {
+    color: #1c1f1c;
+  }
+
+  .search-result {
+    border-color: #d9ddd8;
+    background: #fff;
+  }
+
+  .search-result:hover {
+    border-color: #b9bfb9;
+    background: #f4f4f2;
+  }
+
+  .search-result-icon {
+    border-color: #d9ddd8;
+    background: #eef1ee;
+    color: #3a403a;
+  }
+
+  .search-result-type {
+    color: #555d55;
+  }
+
+  .search-result-preview {
+    color: #3a403a;
+  }
+
+  .search-mark {
+    background: rgb(0 99 209 / 0.16);
+  }
+
+  .search-pagination {
+    color: #555d55;
+  }
+
+  .search-pagination .quiet-button {
+    color: #3a403a;
+  }
+
+  .search-filters-reset {
+    color: #3a403a;
+  }
+
+  .search-footer {
+    border-top-color: #d9ddd8;
+  }
+
+  .search-footer a {
+    color: #1c1f1c;
   }
 }
 
