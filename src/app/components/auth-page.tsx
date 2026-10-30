@@ -2,6 +2,10 @@
 
 import { useState, type FormEvent } from "react";
 import { BrandLogo } from "./brand-logo";
+import BreathBloom from "./breath-bloom";
+
+// Login only: the bloom paints its own petals, so it needs no page background.
+const LOGIN_BLOOM_PARAMS = { background: "transparent" };
 
 export type AuthPageMode =
   | "login"
@@ -157,7 +161,18 @@ export default function AuthPage({ mode, nextPath }: AuthPageProps) {
   }
 
   return (
-    <main className="auth-layout">
+    <>
+      {mode === "login" && (
+        <BreathBloom
+          className="auth-bloom"
+          label="Breathing flower background"
+          guide={false}
+          hint={false}
+          trackWindow
+          params={LOGIN_BLOOM_PARAMS}
+        />
+      )}
+      <main className={mode === "login" ? "auth-layout auth-layout--bloom" : "auth-layout"}>
       <aside className="auth-story">
         <BrandLogo />
         <div className="auth-story-copy">
@@ -251,6 +266,7 @@ export default function AuthPage({ mode, nextPath }: AuthPageProps) {
         <footer className="auth-footer">Nexora - A clearer way to move work forward</footer>
       </section>
     </main>
+    </>
   );
 }
 

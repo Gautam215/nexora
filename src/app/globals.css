@@ -4010,3 +4010,98 @@ h1 {
   backdrop-filter: blur(20px) saturate(1.25);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
+
+/* Breath Bloom (breath-bloom.tsx): plain-CSS equivalents of the original
+   Tailwind classes, plus the login-page background wiring. */
+.bloom-root {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  overflow: hidden;
+  outline: none;
+}
+.bloom-root:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--bloom-ink);
+}
+.bloom-root--interactive {
+  cursor: crosshair;
+}
+.bloom-stage {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.bloom-glow,
+.bloom-petal {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border-radius: 9999px;
+}
+.bloom-guide {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.bloom-word {
+  grid-column-start: 1;
+  grid-row-start: 1;
+  user-select: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  transition: opacity 700ms ease-out, letter-spacing 700ms ease-out;
+}
+.bloom-children {
+  position: relative;
+  z-index: 10;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.bloom-hint {
+  position: absolute;
+  inset-inline: 0;
+  bottom: 20px;
+  z-index: 10;
+  padding-inline: 16px;
+  text-align: center;
+  user-select: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.3em;
+  transition: opacity 500ms;
+  pointer-events: none;
+}
+.bloom-hint-extra {
+  display: none;
+}
+@media (min-width: 640px) {
+  .bloom-hint-extra {
+    display: inline;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bloom-word {
+    transition: none;
+  }
+}
+
+/* Login page only: the bloom is a fixed background layer; the layout sits
+   above it, and the old story arc is gone on this page. */
+.auth-bloom {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+}
+.auth-layout--bloom {
+  position: relative;
+  z-index: 1;
+}
+.auth-layout--bloom .auth-story::after {
+  display: none;
+}
