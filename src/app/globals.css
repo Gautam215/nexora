@@ -4468,10 +4468,22 @@ body.workspaces-dark-bg::after {
   color: #ffffff;
 }
 
+.organization-layout .form-field textarea {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: #000000;
+}
+
+.organization-layout .project-detail-section > .primary-button {
+  margin-top: 12px;
+}
+
+.organization-layout .project-detail-section > .danger-button {
+  margin-top: 12px;
+}
+
 @media (prefers-reduced-transparency: reduce) {
   .organization-layout .form-field input,
-  .organization-layout .form-field select,
-  .organization-layout .form-field textarea {
+  .organization-layout .form-field select {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
     background: #2a2a2e;

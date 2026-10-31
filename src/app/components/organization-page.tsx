@@ -86,6 +86,16 @@ export default function OrganizationPage({ organizationId }: { organizationId: s
 
   return (
     <main className="auth-layout workspace-layout organization-layout">
+      <div className="ws-bg" aria-hidden="true">
+        <div className="ws-bg-base" />
+        <div className="ws-bg-streak ws-bg-streak-1" />
+        <div className="ws-bg-streak ws-bg-streak-2" />
+        <div className="ws-bg-streak ws-bg-streak-3" />
+        <div className="ws-bg-streak ws-bg-streak-4" />
+        <div className="ws-bg-streak ws-bg-streak-5" />
+        <div className="ws-bg-dots" />
+        <div className="ws-bg-highlight" />
+      </div>
       <aside className="auth-story">
         <BrandLogo href="/workspaces" />
         <div className="auth-story-copy">
