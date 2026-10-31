@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { NOTIFICATION_EVENT_TYPES } from "../../security/notification-schemas.ts";
-import { ChevronDownIcon, MailIcon } from "./button-icons";
+import { ChevronDownIcon, ChevronLeftIcon, MailIcon } from "./button-icons";
 
 type NotificationEventType = (typeof NOTIFICATION_EVENT_TYPES)[number];
 
@@ -171,11 +171,13 @@ export default function NotificationCenter({ organizationId }: { organizationId:
   return (
     <main className="project-work-layout">
       <div className="project-work-shell">
-        <a className="secondary-link" href={`/organizations/${encodeURIComponent(organizationId)}`}>Back to workspace</a>
         <section className="project-panel notification-center-panel" aria-labelledby="notifications-title">
           <div className="notification-heading-row">
             <div>
-              <p className="eyebrow">Your workspace</p>
+              <div className="notification-eyebrow-row">
+                <p className="eyebrow">Your workspace</p>
+                <a className="quiet-button" href={`/organizations/${encodeURIComponent(organizationId)}`}><ChevronLeftIcon />Back to workspace</a>
+              </div>
               <h1 id="notifications-title">Notifications</h1>
             </div>
             <span className="notification-count" aria-live="polite">{unreadCount} unread</span>

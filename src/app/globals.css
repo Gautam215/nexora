@@ -4518,3 +4518,11 @@ body.workspaces-dark-bg::after {
     background: #242426;
   }
 }
+
+/* Notifications page: back button in the eyebrow row (2026-10-31, user decision) */
+.notification-center-panel .notification-eyebrow-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
