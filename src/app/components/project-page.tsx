@@ -351,7 +351,7 @@ export default function ProjectPage({
         </div>
         <div className="auth-story-foot">
           <span className="story-rule" aria-hidden="true" />
-          <span>Private by design. Built for focused teams.</span>
+          <span>Design by Gautam. Built for focused teams.</span>
         </div>
       </aside>
 

@@ -64,7 +64,7 @@ export default async function HomePage() {
         </section>
 
         <footer className="page-footer">
-          <span>Private by design</span>
+          <span>Design by Gautam</span>
           <span>Built for focused teams</span>
         </footer>
       </div>

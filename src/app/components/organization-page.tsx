@@ -85,7 +85,7 @@ export default function OrganizationPage({ organizationId }: { organizationId: s
   }, [organizationId]);
 
   return (
-    <main className="auth-layout workspace-layout">
+    <main className="auth-layout workspace-layout organization-layout">
       <aside className="auth-story">
         <BrandLogo href="/workspaces" />
         <div className="auth-story-copy">
@@ -95,7 +95,7 @@ export default function OrganizationPage({ organizationId }: { organizationId: s
         </div>
         <div className="auth-story-foot">
           <span className="story-rule" aria-hidden="true" />
-          <span>Private by design. Built for focused teams.</span>
+          <span>Design by Gautam. Built for focused teams.</span>
         </div>
       </aside>
 

@@ -4334,3 +4334,152 @@ body.workspaces-dark-bg::after {
 .ws-bg-highlight {
   background: radial-gradient(ellipse at center, rgba(30, 41, 59, 0.2), transparent 70%);
 }
+
+/* Organization page: Apple HIG + liquid-glass-widgets pass (2026-10-31).
+   Scoped to .organization-layout only — no other page changes. Buttons
+   are deliberately untouched, and the dark page background is unchanged.
+   Format/layout (widths, order, sections) unchanged; only surfaces, type
+   scale, spacing tokens, focus, and contrast. liquid-glass rule applied:
+   glass stays on the control layer (buttons, dialog panel); content
+   surfaces (card, status tile, list rows) are solid, so no glass sits
+   inside glass. */
+.organization-layout .workspace-card {
+  border-color: rgba(255, 255, 255, 0.12);
+  border-radius: 24px;
+  background: #1c1c1e;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.organization-layout .organization-title-row h2 {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.organization-layout .organization-address {
+  color: rgba(235, 235, 245, 0.6);
+  font-size: 13px;
+}
+
+.organization-layout .organization-monogram {
+  border-color: rgba(255, 255, 255, 0.14);
+  border-radius: 16px;
+  background: #202a23;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  color: #d3e5d8;
+}
+
+.organization-layout .workspace-status-card {
+  align-items: center;
+  padding: 16px 18px;
+  border-color: rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  background: #242426;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.organization-layout .workspace-status-card .status-indicator {
+  margin-top: 0;
+}
+
+.organization-layout .workspace-status-card p {
+  color: rgba(235, 235, 245, 0.6);
+  font-size: 13px;
+}
+
+.organization-layout .secondary-link {
+  color: #0a84ff;
+  text-decoration-color: rgba(10, 132, 255, 0.45);
+}
+
+.organization-layout .auth-form {
+  gap: 20px;
+}
+
+.organization-layout .auth-form h3 {
+  margin: 20px 0 2px;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.organization-layout .project-section-heading h3 {
+  font-size: 17px;
+}
+
+.organization-layout .form-field input,
+.organization-layout .form-field select,
+.organization-layout .form-field textarea {
+  border-radius: 12px;
+  caret-color: #ffffff;
+}
+
+.organization-layout .form-field input::placeholder,
+.organization-layout .form-field textarea::placeholder {
+  color: rgba(235, 235, 245, 0.6);
+}
+
+.organization-layout .form-field input:focus,
+.organization-layout .form-field select:focus,
+.organization-layout .form-field textarea:focus {
+  border-color: rgba(255, 255, 255, 0.25);
+}
+
+.organization-layout .form-field input:focus-visible,
+.organization-layout .form-field select:focus-visible,
+.organization-layout .form-field textarea:focus-visible {
+  border-color: rgba(10, 132, 255, 0.9);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.35);
+}
+
+.organization-layout .confirm-panel {
+  border-radius: 16px;
+}
+
+.organization-layout .confirm-actions {
+  gap: 12px 16px;
+}
+
+.organization-layout .organization-quick-links {
+  gap: 8px 24px;
+}
+
+.organization-layout .project-card {
+  border-color: rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  background: #242426;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
+.organization-layout .project-card:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+  background: #2a2a2e;
+}
+
+.organization-layout ::selection {
+  background: rgba(0, 207, 255, 0.3);
+  color: #ffffff;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .organization-layout .form-field input,
+  .organization-layout .form-field select,
+  .organization-layout .form-field textarea {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: #2a2a2e;
+  }
+
+  .organization-layout .confirm-panel {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    background: #242426;
+  }
+}
