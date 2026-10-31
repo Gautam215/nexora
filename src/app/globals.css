@@ -4526,3 +4526,15 @@ body.workspaces-dark-bg::after {
   justify-content: space-between;
   gap: 12px;
 }
+
+/* Notifications back button: smaller than the unread pill (2026-10-31, user decision) */
+.notification-center-panel .notification-eyebrow-row .quiet-button {
+  min-height: 24px;
+  padding: 3px 9px;
+  font-size: 10px;
+  gap: 5px;
+}
+.notification-center-panel .notification-eyebrow-row .quiet-button svg {
+  width: 13px;
+  height: 13px;
+}

@@ -172,14 +172,12 @@ export default function NotificationCenter({ organizationId }: { organizationId:
     <main className="project-work-layout">
       <div className="project-work-shell">
         <section className="project-panel notification-center-panel" aria-labelledby="notifications-title">
+          <div className="notification-eyebrow-row">
+            <p className="eyebrow">Your workspace</p>
+            <a className="quiet-button" href={`/organizations/${encodeURIComponent(organizationId)}`}><ChevronLeftIcon />Back to workspace</a>
+          </div>
           <div className="notification-heading-row">
-            <div>
-              <div className="notification-eyebrow-row">
-                <p className="eyebrow">Your workspace</p>
-                <a className="quiet-button" href={`/organizations/${encodeURIComponent(organizationId)}`}><ChevronLeftIcon />Back to workspace</a>
-              </div>
-              <h1 id="notifications-title">Notifications</h1>
-            </div>
+            <h1 id="notifications-title">Notifications</h1>
             <span className="notification-count" aria-live="polite">{unreadCount} unread</span>
           </div>
           {error && <p className="form-message form-error" role="alert">{error}</p>}
