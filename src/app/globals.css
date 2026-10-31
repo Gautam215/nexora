@@ -4541,5 +4541,5 @@ body.workspaces-dark-bg::after {
 
 /* Notifications card top gap (2026-10-31, user decision): the panel sat flush against the top of the page once the back link moved inside it */
 .notification-center-panel {
-  margin-top: 12px;
+  margin-top: 32px;
 }
