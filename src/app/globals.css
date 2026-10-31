@@ -4393,8 +4393,8 @@ body.workspaces-dark-bg::after {
 }
 
 .organization-layout .secondary-link {
-  color: #0a84ff;
-  text-decoration-color: rgba(10, 132, 255, 0.45);
+  color: #ffffff;
+  text-decoration-color: rgba(255, 255, 255, 0.45);
 }
 
 .organization-layout .auth-form {
@@ -4448,6 +4448,7 @@ body.workspaces-dark-bg::after {
 
 .organization-layout .organization-quick-links {
   gap: 8px 24px;
+  margin-top: 14px;
 }
 
 .organization-layout .project-card {
